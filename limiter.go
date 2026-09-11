@@ -26,6 +26,11 @@ func NewLimiter(rate float64, capacity float64) *Limiter {
 
 // Allow checks if a request is allowed based on current token availability.
 func (l *Limiter) Allow() bool {
+	return l.AllowN(1.0)
+}
+
+// AllowN checks if a request requiring n tokens is allowed.
+func (l *Limiter) AllowN(n float64) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -39,8 +44,8 @@ func (l *Limiter) Allow() bool {
 		l.tokens = l.capacity
 	}
 
-	if l.tokens >= 1.0 {
-		l.tokens -= 1.0
+	if l.tokens >= n {
+		l.tokens -= n
 		return true
 	}
 
@@ -49,28 +54,29 @@ func (l *Limiter) Allow() bool {
 
 // Wait blocks until a token is available.
 func (l *Limiter) Wait() {
-	l.mu.Lock()
-	now := time.Now()
-	elapsed := now.Sub(l.lastUpdate).Seconds()
-	l.tokens += elapsed * l.rate
-	if l.tokens > l.capacity {
-		l.tokens = l.capacity
-	}
+	for {
+		l.mu.Lock()
+		now := time.Now()
+		elapsed := now.Sub(l.lastUpdate).Seconds()
+		l.tokens += elapsed * l.rate
+		if l.tokens > l.capacity {
+			l.tokens = l.capacity
+		}
 
-	if l.tokens >= 1.0 {
-		l.tokens -= 1.0
-		l.lastUpdate = now
+		if l.tokens >= 1.0 {
+			l.tokens -= 1.0
+			l.lastUpdate = now
+			l.mu.Unlock()
+			return
+		}
+
+		// Calculate time to wait for the next token
+		tokensNeeded := 1.0 - l.tokens
+		waitDuration := time.Duration(tokensNeeded / l.rate * float64(time.Second))
 		l.mu.Unlock()
-		return
+
+		time.Sleep(waitDuration)
 	}
-
-	// Calculate time to wait for the next token
-	tokensNeeded := 1.0 - l.tokens
-	waitDuration := time.Duration(tokensNeeded / l.rate * float64(time.Second))
-	l.mu.Unlock()
-
-	time.Sleep(waitDuration)
-	l.Wait() // Retry after waiting
 }
 
 // GetTokens returns the current number of tokens in the bucket.

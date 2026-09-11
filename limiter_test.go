@@ -35,6 +35,25 @@ func TestLimiter_Allow(t *testing.T) {
 	}
 }
 
+func TestLimiter_AllowN(t *testing.T) {
+	l := NewLimiter(10, 5)
+
+	// Request 3 tokens
+	if !l.AllowN(3.0) {
+		t.Error("Request for 3 tokens should have been allowed")
+	}
+
+	// Request 3 more tokens (only 2 left)
+	if l.AllowN(3.0) {
+		t.Error("Request for 3 tokens should have been denied")
+	}
+
+	// Request 2 tokens
+	if !l.AllowN(2.0) {
+		t.Error("Request for 2 tokens should have been allowed")
+	}
+}
+
 func TestLimiter_Wait(t *testing.T) {
 	l := NewLimiter(10, 1)
 
