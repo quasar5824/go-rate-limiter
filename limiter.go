@@ -67,19 +67,26 @@ func (l *Limiter) WaitN(n float64) {
 		if l.tokens > l.capacity {
 			l.tokens = l.capacity
 		}
+		l.lastUpdate = now
 
 		if l.tokens >= n {
 			l.tokens -= n
-			l.lastUpdate = now
 			l.mu.Unlock()
 			return
 		}
 
 		// Calculate time to wait for the remaining tokens
 		tokensNeeded := n - l.tokens
-		waitDuration := time.Duration(tokensNeeded / l.rate * float64(time.Second))
 		l.mu.Unlock()
 
+		if l.rate <= 0 {
+			// If rate is 0, we can never refill. To avoid infinite loop/panic, we wait indefinitely or handle error.
+			// For this library, we'll wait a reasonable amount and retry to avoid CPU spinning if rate was changed dynamically
+			time.Sleep(time.Second)
+			continue
+		}
+
+		waitDuration := time.Duration(tokensNeeded / l.rate * float64(time.Second))
 		time.Sleep(waitDuration)
 	}
 }
