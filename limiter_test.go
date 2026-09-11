@@ -34,3 +34,25 @@ func TestLimiter_Allow(t *testing.T) {
 		t.Error("Third request after refill should be denied")
 	}
 }
+
+func TestLimiter_Wait(t *testing.T) {
+	l := NewLimiter(10, 1)
+
+	// First request should be immediate
+	start := time.Now()
+	l.Wait()
+	if time.Since(start) > 100*time.Millisecond {
+		t.Errorf("First Wait took too long: %v", time.Since(start))
+	}
+
+	// Second request should wait ~100ms (1 token / 10 tps)
+	start = time.Now()
+	l.Wait()
+	elapsed := time.Since(start)
+	if elapsed < 80*time.Millisecond {
+		t.Errorf("Wait returned too early: %v", elapsed)
+	}
+	if elapsed > 200*time.Millisecond {
+		t.Errorf("Wait took too long: %v", elapsed)
+	}
+}

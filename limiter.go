@@ -47,6 +47,32 @@ func (l *Limiter) Allow() bool {
 	return false
 }
 
+// Wait blocks until a token is available.
+func (l *Limiter) Wait() {
+	l.mu.Lock()
+	now := time.Now()
+	elapsed := now.Sub(l.lastUpdate).Seconds()
+	l.tokens += elapsed * l.rate
+	if l.tokens > l.capacity {
+		l.tokens = l.capacity
+	}
+
+	if l.tokens >= 1.0 {
+		l.tokens -= 1.0
+		l.lastUpdate = now
+		l.mu.Unlock()
+		return
+	}
+
+	// Calculate time to wait for the next token
+	tokensNeeded := 1.0 - l.tokens
+	waitDuration := time.Duration(tokensNeeded / l.rate * float64(time.Second))
+	l.mu.Unlock()
+
+	time.Sleep(waitDuration)
+	l.Wait() // Retry after waiting
+}
+
 // GetTokens returns the current number of tokens in the bucket.
 func (l *Limiter) GetTokens() float64 {
 	l.mu.Lock()
