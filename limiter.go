@@ -54,6 +54,11 @@ func (l *Limiter) AllowN(n float64) bool {
 
 // Wait blocks until a token is available.
 func (l *Limiter) Wait() {
+	l.WaitN(1.0)
+}
+
+// WaitN blocks until n tokens are available.
+func (l *Limiter) WaitN(n float64) {
 	for {
 		l.mu.Lock()
 		now := time.Now()
@@ -63,15 +68,15 @@ func (l *Limiter) Wait() {
 			l.tokens = l.capacity
 		}
 
-		if l.tokens >= 1.0 {
-			l.tokens -= 1.0
+		if l.tokens >= n {
+			l.tokens -= n
 			l.lastUpdate = now
 			l.mu.Unlock()
 			return
 		}
 
-		// Calculate time to wait for the next token
-		tokensNeeded := 1.0 - l.tokens
+		// Calculate time to wait for the remaining tokens
+		tokensNeeded := n - l.tokens
 		waitDuration := time.Duration(tokensNeeded / l.rate * float64(time.Second))
 		l.mu.Unlock()
 

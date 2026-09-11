@@ -75,3 +75,21 @@ func TestLimiter_Wait(t *testing.T) {
 		t.Errorf("Wait took too long: %v", elapsed)
 	}
 }
+
+func TestLimiter_WaitN(t *testing.T) {
+	l := NewLimiter(10, 1)
+
+	// Consume initial token
+	l.Wait()
+
+	// Request 2 tokens. Should wait ~200ms (2 tokens / 10 tps)
+	start := time.Now()
+	l.WaitN(2.0)
+	elapsed := time.Since(start)
+	if elapsed < 180*time.Millisecond {
+		t.Errorf("WaitN returned too early: %v", elapsed)
+	}
+	if elapsed > 300*time.Millisecond {
+		t.Errorf("WaitN took too long: %v", elapsed)
+	}
+}
