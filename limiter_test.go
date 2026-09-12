@@ -1,6 +1,7 @@
 package ratelimit
 
 import (
+	"context"
 	"testing"
 	"time"
 )
@@ -84,13 +85,27 @@ func TestLimiter_WaitN(t *testing.T) {
 
 	// Request 2 tokens. Should wait ~200ms (2 tokens / 10 tps)
 	start := time.Now()
-	l.WaitN(2.0)
+	l.WaitN(context.Background(), 2.0)
 	elapsed := time.Since(start)
 	if elapsed < 180*time.Millisecond {
 		t.Errorf("WaitN returned too early: %v", elapsed)
 	}
 	if elapsed > 300*time.Millisecond {
 		t.Errorf("WaitN took too long: %v", elapsed)
+	}
+}
+
+func TestLimiter_WaitN_Context(t *testing.T) {
+	l := NewLimiter(10, 0)
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	l.WaitN(ctx, 1.0)
+	elapsed := time.Since(start)
+
+	if elapsed < 40*time.Millisecond || elapsed > 100*time.Millisecond {
+		t.Errorf("WaitN should have returned due to context timeout around 50ms, took: %v", elapsed)
 	}
 }
 

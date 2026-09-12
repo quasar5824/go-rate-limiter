@@ -1,6 +1,7 @@
 package ratelimit
 
 import (
+	"context"
 	"sync"
 	"time"
 )
@@ -96,11 +97,11 @@ func (l *Limiter) Reserve(n float64) time.Duration {
 
 // Wait blocks until a token is available.
 func (l *Limiter) Wait() {
-	l.WaitN(1.0)
+	l.WaitN(context.Background(), 1.0)
 }
 
-// WaitN blocks until n tokens are available.
-func (l *Limiter) WaitN(n float64) {
+// WaitN blocks until n tokens are available or the context is canceled.
+func (l *Limiter) WaitN(ctx context.Context, n float64) {
 	for {
 		l.mu.Lock()
 		now := time.Now()
@@ -122,20 +123,20 @@ func (l *Limiter) WaitN(n float64) {
 		l.mu.Unlock()
 
 		if l.rate <= 0 {
-			// If rate is 0, we can never refill. To avoid infinite loop/panic, we wait indefinitely or handle error.
-			// For this library, we'll wait a reasonable amount and retry to avoid CPU spinning if rate was changed dynamically
-			time.Sleep(time.Second)
-			continue
+			// If rate is 0, we can never refill. Wait a bit and retry to see if rate changes
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(time.Second):
+				continue
+			}
 		}
 
 		waitDuration := time.Duration(tokensNeeded / l.rate * float64(time.Second))
-		time.Sleep(waitDuration)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(waitDuration):
+		}
 	}
-}
-
-// GetTokens returns the current number of tokens in the bucket.
-func (l *Limiter) GetTokens() float64 {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.tokens
 }
