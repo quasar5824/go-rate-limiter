@@ -25,6 +25,19 @@ func NewLimiter(rate float64, capacity float64) *Limiter {
 	}
 }
 
+// refill updates the token count based on the time elapsed since the last update.
+// Must be called while holding the lock.
+func (l *Limiter) refill() {
+	now := time.Now()
+	elapsed := now.Sub(l.lastUpdate).Seconds()
+	l.lastUpdate = now
+
+	l.tokens += elapsed * l.rate
+	if l.tokens > l.capacity {
+		l.tokens = l.capacity
+	}
+}
+
 // SetLimit updates the rate and capacity of the limiter.
 func (l *Limiter) SetLimit(rate float64, capacity float64) {
 	l.mu.Lock()
@@ -47,15 +60,7 @@ func (l *Limiter) AllowN(n float64) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	now := time.Now()
-	elapsed := now.Sub(l.lastUpdate).Seconds()
-	l.lastUpdate = now
-
-	// Refill tokens based on elapsed time
-	l.tokens += elapsed * l.rate
-	if l.tokens > l.capacity {
-		l.tokens = l.capacity
-	}
+	l.refill()
 
 	if l.tokens >= n {
 		l.tokens -= n
@@ -71,13 +76,7 @@ func (l *Limiter) Reserve(n float64) time.Duration {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	now := time.Now()
-	elapsed := now.Sub(l.lastUpdate).Seconds()
-	l.tokens += elapsed * l.rate
-	if l.tokens > l.capacity {
-		l.tokens = l.capacity
-	}
-	l.lastUpdate = now
+	l.refill()
 
 	if l.tokens >= n {
 		l.tokens -= n
@@ -104,13 +103,7 @@ func (l *Limiter) Wait() {
 func (l *Limiter) WaitN(ctx context.Context, n float64) {
 	for {
 		l.mu.Lock()
-		now := time.Now()
-		elapsed := now.Sub(l.lastUpdate).Seconds()
-		l.tokens += elapsed * l.rate
-		if l.tokens > l.capacity {
-			l.tokens = l.capacity
-		}
-		l.lastUpdate = now
+		l.refill()
 
 		if l.tokens >= n {
 			l.tokens -= n
