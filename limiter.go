@@ -24,6 +24,18 @@ func NewLimiter(rate float64, capacity float64) *Limiter {
 	}
 }
 
+// SetLimit updates the rate and capacity of the limiter.
+func (l *Limiter) SetLimit(rate float64, capacity float64) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	l.rate = rate
+	l.capacity = capacity
+	if l.tokens > capacity {
+		l.tokens = capacity
+	}
+}
+
 // Allow checks if a request is allowed based on current token availability.
 func (l *Limiter) Allow() bool {
 	return l.AllowN(1.0)
@@ -50,6 +62,36 @@ func (l *Limiter) AllowN(n float64) bool {
 	}
 
 	return false
+}
+
+// Reserve returns the duration to wait until n tokens become available.
+// It consumes the tokens immediately (reserves them).
+func (l *Limiter) Reserve(n float64) time.Duration {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	now := time.Now()
+	elapsed := now.Sub(l.lastUpdate).Seconds()
+	l.tokens += elapsed * l.rate
+	if l.tokens > l.capacity {
+		l.tokens = l.capacity
+	}
+	l.lastUpdate = now
+
+	if l.tokens >= n {
+		l.tokens -= n
+		return 0
+	}
+
+	tokensNeeded := n - l.tokens
+	l.tokens = 0
+
+	if l.rate <= 0 {
+		return time.Duration(1<<63 - 1) // Max duration
+	}
+
+	waitDuration := time.Duration(tokensNeeded / l.rate * float64(time.Second))
+	return waitDuration
 }
 
 // Wait blocks until a token is available.

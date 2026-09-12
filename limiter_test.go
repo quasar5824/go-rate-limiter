@@ -93,3 +93,39 @@ func TestLimiter_WaitN(t *testing.T) {
 		t.Errorf("WaitN took too long: %v", elapsed)
 	}
 }
+
+func TestLimiter_Reserve(t *testing.T) {
+	l := NewLimiter(10, 1)
+
+	// Consume initial token
+	l.Allow()
+
+	// Reserve 1 token. Rate is 10/s, so 1 token = 100ms
+	wait := l.Reserve(1.0)
+	if wait < 80*time.Millisecond || wait > 120*time.Millisecond {
+		t.Errorf("Reserve duration unexpected: %v", wait)
+	}
+
+	// Reserve 2 more tokens. Since the previous reserve emptied the bucket,
+	// these 2 tokens should take 200ms from now
+	wait2 := l.Reserve(2.0)
+	if wait2 < 180*time.Millisecond || wait2 > 220*time.Millisecond {
+		t.Errorf("Reserve duration unexpected: %v", wait2)
+	}
+}
+
+func TestLimiter_SetLimit(t *testing.T) {
+	l := NewLimiter(10, 1)
+	
+	// Use it up
+	l.Allow()
+
+	// Change rate to 100/s
+	l.SetLimit(100, 1)
+
+	// Reserve 1 token. Should be ~10ms now
+	wait := l.Reserve(1.0)
+	if wait < 0 || wait > 20*time.Millisecond {
+		t.Errorf("Reserve duration after SetLimit unexpected: %v", wait)
+	}
+}
