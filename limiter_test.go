@@ -55,6 +55,30 @@ func TestLimiter_AllowN(t *testing.T) {
 	}
 }
 
+func TestLimiter_AllowWithDuration(t *testing.T) {
+	l := NewLimiter(10, 1)
+
+	// Use initial token
+	l.Allow()
+
+	// Now bucket is empty. Request 1 token.
+	allowed, wait := l.AllowWithDuration(1.0)
+	if allowed {
+		t.Error("Request should have been denied")
+	}
+	
+	// Expect wait around 100ms (1 token / 10 tps)
+	if wait < 80*time.Millisecond || wait > 120*time.Millisecond {
+		t.Errorf("Unexpected wait duration: %v", wait)
+	}
+
+	// Ensure no tokens were consumed during the failed check
+	time.Sleep(110 * time.Millisecond)
+	if !l.Allow() {
+		t.Error("Request should be allowed after waiting")
+	}
+}
+
 func TestLimiter_BatchAllow(t *testing.T) {
 	l := NewLimiter(10, 5)
 

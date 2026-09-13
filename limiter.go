@@ -70,6 +70,27 @@ func (l *Limiter) AllowN(n float64) bool {
 	return false
 }
 
+// AllowWithDuration checks if n tokens are available. If they are, it consumes them and returns true, 0.
+// If not, it returns false and the duration to wait until n tokens would be available, without consuming tokens.
+func (l *Limiter) AllowWithDuration(n float64) (bool, time.Duration) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	l.refill()
+
+	if l.tokens >= n {
+		l.tokens -= n
+		return true, 0
+	}
+
+	if l.rate <= 0 {
+		return false, time.Duration(1<<63 - 1)
+	}
+
+	waitDuration := time.Duration((n - l.tokens) / l.rate * float64(time.Second))
+	return false, waitDuration
+}
+
 // BatchAllow checks multiple requests and consumes tokens for those that are allowed.
 // It returns a slice of booleans corresponding to the input requirements.
 func (l *Limiter) BatchAllow(requests []float64) []bool {
