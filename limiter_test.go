@@ -55,6 +55,26 @@ func TestLimiter_AllowN(t *testing.T) {
 	}
 }
 
+func TestLimiter_Available(t *testing.T) {
+	l := NewLimiter(10, 5)
+
+	if l.Available() != 5.0 {
+		t.Errorf("Expected 5 tokens, got %v", l.Available())
+	}
+
+	l.AllowN(2.0)
+	if l.Available() != 3.0 {
+		t.Errorf("Expected 3 tokens after consumption, got %v", l.Available())
+	}
+
+	// Wait for refill (0.1s * 10 = 1 token)
+	time.Sleep(100 * time.Millisecond)
+	avail := l.Available()
+	if avail < 3.0 || avail > 4.1 {
+		t.Errorf("Expected tokens to be around 4.0 after refill, got %v", avail)
+	}
+}
+
 func TestLimiter_Wait(t *testing.T) {
 	l := NewLimiter(10, 1)
 

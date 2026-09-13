@@ -70,6 +70,15 @@ func (l *Limiter) AllowN(n float64) bool {
 	return false
 }
 
+// Available returns the number of tokens currently available in the bucket.
+func (l *Limiter) Available() float64 {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	l.refill()
+	return l.tokens
+}
+
 // Reserve returns the duration to wait until n tokens become available.
 // It consumes the tokens immediately (reserves them).
 func (l *Limiter) Reserve(n float64) time.Duration {
