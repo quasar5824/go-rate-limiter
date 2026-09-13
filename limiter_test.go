@@ -55,6 +55,27 @@ func TestLimiter_AllowN(t *testing.T) {
 	}
 }
 
+func TestLimiter_BatchAllow(t *testing.T) {
+	l := NewLimiter(10, 5)
+
+	// Request 3, 1, 2 tokens. Total 6. Bucket has 5.
+	// 3 should be allowed, 1 should be allowed (4 total), 2 should be denied.
+	requests := []float64{3.0, 1.0, 2.0}
+	expected := []bool{true, true, false}
+	results := l.BatchAllow(requests)
+
+	for i, res := range results {
+		if res != expected[i] {
+			t.Errorf("Request %d (%.1f tokens) expected %v, got %v", i, requests[i], expected[i], res)
+		}
+	}
+
+	// Check remaining: 5 - 4 = 1
+	if l.Available() != 1.0 {
+		t.Errorf("Expected 1 token remaining, got %v", l.Available())
+	}
+}
+
 func TestLimiter_Available(t *testing.T) {
 	l := NewLimiter(10, 5)
 

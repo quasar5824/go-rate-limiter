@@ -70,6 +70,26 @@ func (l *Limiter) AllowN(n float64) bool {
 	return false
 }
 
+// BatchAllow checks multiple requests and consumes tokens for those that are allowed.
+// It returns a slice of booleans corresponding to the input requirements.
+func (l *Limiter) BatchAllow(requests []float64) []bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	l.refill()
+
+	results := make([]bool, len(requests))
+	for i, n := range requests {
+		if l.tokens >= n {
+			l.tokens -= n
+			results[i] = true
+		} else {
+			results[i] = false
+		}
+	}
+	return results
+}
+
 // Available returns the number of tokens currently available in the bucket.
 func (l *Limiter) Available() float64 {
 	l.mu.Lock()
