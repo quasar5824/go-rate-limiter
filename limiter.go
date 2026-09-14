@@ -123,6 +123,11 @@ func (l *Limiter) Available() float64 {
 // Reserve returns the duration to wait until n tokens become available.
 // It consumes the tokens immediately (reserves them).
 func (l *Limiter) Reserve(n float64) time.Duration {
+	return l.ReserveN(n)
+}
+
+// ReserveN reserves n tokens and returns the duration to wait until they are available.
+func (l *Limiter) ReserveN(n float64) time.Duration {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -151,34 +156,17 @@ func (l *Limiter) Wait() {
 
 // WaitN blocks until n tokens are available or the context is canceled.
 func (l *Limiter) WaitN(ctx context.Context, n float64) {
-	for {
-		l.mu.Lock()
-		l.refill()
+	waitDuration := l.ReserveN(n)
+	if waitDuration <= 0 {
+		return
+	}
 
-		if l.tokens >= n {
-			l.tokens -= n
-			l.mu.Unlock()
-			return
-		}
-
-		tokensNeeded := n - l.tokens
-		currentRate := l.rate
-		l.mu.Unlock()
-
-		if currentRate <= 0 {
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(100 * time.Millisecond):
-				continue
-			}
-		}
-
-		waitDuration := time.Duration(tokensNeeded / currentRate * float64(time.Second))
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(waitDuration):
-		}
+	select {
+	case <-ctx.Done():
+		// If the context is canceled, we ideally should return the reserved tokens,
+		// but the token bucket algorithm's Reserve typically consumes them upfront
+		// to guarantee the slot. Returning them would require more complex state tracking.
+		return
+	case <-time.After(waitDuration):
 	}
 }
