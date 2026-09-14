@@ -70,6 +70,11 @@ func (l *Limiter) AllowN(n float64) bool {
 	return false
 }
 
+// TryAllow is a convenience alias for AllowN, emphasizing the non-blocking attempt.
+func (l *Limiter) TryAllow(n float64) bool {
+	return l.AllowN(n)
+}
+
 // AllowWithDuration checks if n tokens are available. If they are, it consumes them and returns true, 0.
 // If not, it returns false and the duration to wait until n tokens would be available, without consuming tokens.
 func (l *Limiter) AllowWithDuration(n float64) (bool, time.Duration) {
