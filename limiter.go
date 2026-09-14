@@ -161,21 +161,20 @@ func (l *Limiter) WaitN(ctx context.Context, n float64) {
 			return
 		}
 
-		// Calculate time to wait for the remaining tokens
 		tokensNeeded := n - l.tokens
+		currentRate := l.rate
 		l.mu.Unlock()
 
-		if l.rate <= 0 {
-			// If rate is 0, we can never refill. Wait a bit and retry to see if rate changes
+		if currentRate <= 0 {
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.After(time.Second):
+			case <-time.After(100 * time.Millisecond):
 				continue
 			}
 		}
 
-		waitDuration := time.Duration(tokensNeeded / l.rate * float64(time.Second))
+		waitDuration := time.Duration(tokensNeeded / currentRate * float64(time.Second))
 		select {
 		case <-ctx.Done():
 			return
