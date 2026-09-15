@@ -175,3 +175,17 @@ func (l *Limiter) WaitN(ctx context.Context, n float64) {
 	case <-time.After(waitDuration):
 	}
 }
+
+// WaitUntil blocks until the specified time is reached or the context is canceled.
+func (l *Limiter) WaitUntil(ctx context.Context, target time.Time) {
+	now := time.Now()
+	if target.Before(now) {
+		return
+	}
+
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(target.Sub(now)):
+	}
+}

@@ -209,3 +209,39 @@ func TestLimiter_SetLimit(t *testing.T) {
 		t.Errorf("Reserve duration after SetLimit unexpected: %v", wait)
 	}
 }
+
+func TestLimiter_WaitUntil(t *testing.T) {
+	l := NewLimiter(10, 1)
+	ctx := context.Background()
+
+	// Test waiting for a future time
+	target := time.Now().Add(100 * time.Millisecond)
+	start := time.Now()
+	l.WaitUntil(ctx, target)
+	elapsed := time.Since(start)
+
+	if elapsed < 80*time.Millisecond {
+		t.Errorf("WaitUntil returned too early: %v", elapsed)
+	}
+
+	// Test waiting for a past time
+	start = time.Now()
+	l.WaitUntil(ctx, time.Now().Add(-100*time.Millisecond))
+	if time.Since(start) > 10*time.Millisecond {
+		t.Error("WaitUntil should return immediately for past times")
+	}
+
+	// Test context cancellation
+	ctxCancel, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		cancel()
+	}()
+
+	start = time.Now()
+	l.WaitUntil(ctxCancel, time.Now().Add(200*time.Millisecond))
+	elapsed = time.Since(start)
+	if elapsed > 100*time.Millisecond {
+		t.Errorf("WaitUntil should have returned early due to context cancellation, took: %v", elapsed)
+	}
+}
