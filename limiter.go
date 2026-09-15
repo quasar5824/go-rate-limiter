@@ -6,8 +6,25 @@ import (
 	"time"
 )
 
-// Limiter implements a token bucket rate limiting algorithm.
-type Limiter struct {
+// Limiter defines the interface for a rate limiter.
+type Limiter interface {
+	Allow() bool
+	AllowN(n float64) bool
+	TryAllow(n float64) bool
+	AllowWithDuration(n float64) (bool, time.Duration)
+	BatchAllow(requests []float64) []bool
+	Available() float64
+	Peek() float64
+	Reserve(n float64) time.Duration
+	ReserveN(n float64) time.Duration
+	Wait()
+	WaitN(ctx context.Context, n float64)
+	WaitUntil(ctx context.Context, target time.Time)
+	SetLimit(rate, capacity float64)
+}
+
+// tokenBucket implements the Limiter interface using the token bucket algorithm.
+type tokenBucket struct {
 	rate       float64
 	capacity    float64
 	tokens     float64
@@ -16,8 +33,8 @@ type Limiter struct {
 }
 
 // NewLimiter creates a new Limiter with a given rate (tokens per second) and bucket capacity.
-func NewLimiter(rate float64, capacity float64) *Limiter {
-	return &Limiter{
+func NewLimiter(rate float64, capacity float64) Limiter {
+	return &tokenBucket{
 		rate:       rate,
 		capacity:    capacity,
 		tokens:     capacity,
@@ -27,7 +44,7 @@ func NewLimiter(rate float64, capacity float64) *Limiter {
 
 // refill updates the token count based on the time elapsed since the last update.
 // Must be called while holding the lock.
-func (l *Limiter) refill() {
+func (l *tokenBucket) refill() {
 	now := time.Now()
 	elapsed := now.Sub(l.lastUpdate).Seconds()
 	l.lastUpdate = now
@@ -39,7 +56,7 @@ func (l *Limiter) refill() {
 }
 
 // SetLimit updates the rate and capacity of the limiter.
-func (l *Limiter) SetLimit(rate float64, capacity float64) {
+func (l *tokenBucket) SetLimit(rate float64, capacity float64) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -51,12 +68,12 @@ func (l *Limiter) SetLimit(rate float64, capacity float64) {
 }
 
 // Allow checks if a request is allowed based on current token availability.
-func (l *Limiter) Allow() bool {
+func (l *tokenBucket) Allow() bool {
 	return l.AllowN(1.0)
 }
 
 // AllowN checks if a request requiring n tokens is allowed.
-func (l *Limiter) AllowN(n float64) bool {
+func (l *tokenBucket) AllowN(n float64) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -71,13 +88,13 @@ func (l *Limiter) AllowN(n float64) bool {
 }
 
 // TryAllow is a convenience alias for AllowN, emphasizing the non-blocking attempt.
-func (l *Limiter) TryAllow(n float64) bool {
+func (l *tokenBucket) TryAllow(n float64) bool {
 	return l.AllowN(n)
 }
 
 // AllowWithDuration checks if n tokens are available. If they are, it consumes them and returns true, 0.
 // If not, it returns false and the duration to wait until n tokens would be available, without consuming tokens.
-func (l *Limiter) AllowWithDuration(n float64) (bool, time.Duration) {
+func (l *tokenBucket) AllowWithDuration(n float64) (bool, time.Duration) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -98,7 +115,7 @@ func (l *Limiter) AllowWithDuration(n float64) (bool, time.Duration) {
 
 // BatchAllow checks multiple requests and consumes tokens for those that are allowed.
 // It returns a slice of booleans corresponding to the input requirements.
-func (l *Limiter) BatchAllow(requests []float64) []bool {
+func (l *tokenBucket) BatchAllow(requests []float64) []bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -117,7 +134,7 @@ func (l *Limiter) BatchAllow(requests []float64) []bool {
 }
 
 // Available returns the number of tokens currently available in the bucket.
-func (l *Limiter) Available() float64 {
+func (l *tokenBucket) Available() float64 {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -127,7 +144,7 @@ func (l *Limiter) Available() float64 {
 
 // Peek returns the number of tokens available without triggering a refill.
 // This is useful for inspecting the state as of the last operation.
-func (l *Limiter) Peek() float64 {
+func (l *tokenBucket) Peek() float64 {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.tokens
@@ -135,12 +152,12 @@ func (l *Limiter) Peek() float64 {
 
 // Reserve returns the duration to wait until n tokens become available.
 // It consumes the tokens immediately (reserves them).
-func (l *Limiter) Reserve(n float64) time.Duration {
+func (l *tokenBucket) Reserve(n float64) time.Duration {
 	return l.ReserveN(n)
 }
 
 // ReserveN reserves n tokens and returns the duration to wait until they are available.
-func (l *Limiter) ReserveN(n float64) time.Duration {
+func (l *tokenBucket) ReserveN(n float64) time.Duration {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -163,12 +180,12 @@ func (l *Limiter) ReserveN(n float64) time.Duration {
 }
 
 // Wait blocks until a token is available.
-func (l *Limiter) Wait() {
+func (l *tokenBucket) Wait() {
 	l.WaitN(context.Background(), 1.0)
 }
 
 // WaitN blocks until n tokens are available or the context is canceled.
-func (l *Limiter) WaitN(ctx context.Context, n float64) {
+func (l *tokenBucket) WaitN(ctx context.Context, n float64) {
 	waitDuration := l.ReserveN(n)
 	if waitDuration <= 0 {
 		return
@@ -176,16 +193,13 @@ func (l *Limiter) WaitN(ctx context.Context, n float64) {
 
 	select {
 	case <-ctx.Done():
-		// If the context is canceled, we ideally should return the reserved tokens,
-		// but the token bucket algorithm's Reserve typically consumes them upfront
-		// to guarantee the slot. Returning them would require more complex state tracking.
 		return
 	case <-time.After(waitDuration):
 	}
 }
 
 // WaitUntil blocks until the specified time is reached or the context is canceled.
-func (l *Limiter) WaitUntil(ctx context.Context, target time.Time) {
+func (l *tokenBucket) WaitUntil(ctx context.Context, target time.Time) {
 	now := time.Now()
 	if target.Before(now) {
 		return
