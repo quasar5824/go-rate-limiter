@@ -125,6 +125,14 @@ func (l *Limiter) Available() float64 {
 	return l.tokens
 }
 
+// Peek returns the number of tokens available without triggering a refill.
+// This is useful for inspecting the state as of the last operation.
+func (l *Limiter) Peek() float64 {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.tokens
+}
+
 // Reserve returns the duration to wait until n tokens become available.
 // It consumes the tokens immediately (reserves them).
 func (l *Limiter) Reserve(n float64) time.Duration {

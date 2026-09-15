@@ -120,6 +120,35 @@ func TestLimiter_Available(t *testing.T) {
 	}
 }
 
+func TestLimiter_Peek(t *testing.T) {
+	l := NewLimiter(10, 5)
+
+	// Initial capacity
+	if l.Peek() != 5.0 {
+		t.Errorf("Expected 5 tokens, got %v", l.Peek())
+	}
+
+	l.AllowN(2.0)
+	if l.Peek() != 3.0 {
+		t.Errorf("Expected 3 tokens after consumption, got %v", l.Peek())
+	}
+
+	// Wait for some refill
+	time.Sleep(100 * time.Millisecond)
+
+	// Peek should NOT refill
+	peekVal := l.Peek()
+	if peekVal != 3.0 {
+		t.Errorf("Peek should not refill. Expected 3.0, got %v", peekVal)
+	}
+
+	// Available SHOULD refill
+	availVal := l.Available()
+	if availVal <= 3.0 {
+		t.Errorf("Available should have triggered refill. Got %v", availVal)
+	}
+}
+
 func TestLimiter_Wait(t *testing.T) {
 	l := NewLimiter(10, 1)
 
