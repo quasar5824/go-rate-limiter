@@ -36,6 +36,22 @@ func TestLimiter_Allow(t *testing.T) {
 	}
 }
 
+func TestLimiter_NewBurstLimiter(t *testing.T) {
+	l := NewBurstLimiter(10, 5)
+
+	// Initial request should be denied immediately as bucket is empty
+	if l.Allow() {
+		t.Error("First request to NewBurstLimiter should be denied")
+	}
+
+	// Wait for 1 token (100ms)
+	time.Sleep(110 * time.Millisecond)
+
+	if !l.Allow() {
+		t.Error("Request after refill should be allowed")
+	}
+}
+
 func TestLimiter_AllowN(t *testing.T) {
 	l := NewLimiter(10, 5)
 
