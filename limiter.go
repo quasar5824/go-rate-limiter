@@ -227,3 +227,37 @@ func (l *tokenBucket) WaitUntil(ctx context.Context, target time.Time) {
 	case <-time.After(target.Sub(now)):
 	}
 }
+
+// WeightedLimiter is a wrapper around Limiter that assigns weights to different operation keys.
+type WeightedLimiter struct {
+	limiter Limiter
+	weights map[string]float64
+	mu      sync.RWMutex
+}
+
+// NewWeightedLimiter creates a new WeightedLimiter.
+func NewWeightedLimiter(l Limiter, weights map[string]float64) *WeightedLimiter {
+	return &WeightedLimiter{
+		limiter: l,
+		weights: weights,
+	}
+}
+
+// AllowKey checks if an operation with a specific key is allowed based on its weight.
+func (wl *WeightedLimiter) AllowKey(key string) bool {
+	wl.mu.RLock()
+	weight, ok := wl.weights[key]
+	wl.mu.RUnlock()
+
+	if !ok {
+		return wl.limiter.Allow() // Default to 1 token if key not found
+	}
+	return wl.limiter.AllowN(weight)
+}
+
+// SetWeight updates the weight for a specific operation key.
+func (wl *WeightedLimiter) SetWeight(key string, weight float64) {
+	wl.mu.Lock()
+	defer wl.mu.Unlock()
+	wl.weights[key] = weight
+}

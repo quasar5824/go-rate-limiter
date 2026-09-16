@@ -311,3 +311,49 @@ func TestLimiter_WaitUntil(t *testing.T) {
 		t.Errorf("WaitUntil should have returned early due to context cancellation, took: %v", elapsed)
 	}
 }
+
+func TestWeightedLimiter(t *testing.T) {
+	l := NewLimiter(10, 5)
+	weights := map[string]float64{
+		"read":  1.0,
+		"write": 5.0,
+	}
+	wl := NewWeightedLimiter(l, weights)
+
+	// Should allow 5 reads
+	for i := 0; i < 5; i++ {
+		if !wl.AllowKey("read") {
+			t.Errorf("Read %d should be allowed", i+1)
+		}
+	}
+
+	// 6th read should be denied
+	if wl.AllowKey("read") {
+		t.Error("6th read should be denied")
+	}
+
+	// Reset bucket for write test
+	l.SetLimit(10, 5)
+	l.AllowN(-5.0) // Artificial refill or just use a new limiter
+	l2 := NewLimiter(10, 5)
+	wl2 := NewWeightedLimiter(l2, weights)
+
+	// Should allow 1 write (5 tokens)
+	if !wl2.AllowKey("write") {
+		t.Error("First write should be allowed")
+	}
+
+	// Second write should be denied (0 tokens left)
+	if wl2.AllowKey("write") {
+		t.Error("Second write should be denied")
+	}
+
+	// Test default weight for unknown key
+	if !wl2.AllowKey("unknown") {
+		// Need to wait for refill first as bucket is empty
+		time.Sleep(110 * time.Millisecond)
+		if !wl2.AllowKey("unknown") {
+			t.Error("Unknown key should default to weight 1.0 and be allowed after refill")
+		}
+	}
+}
