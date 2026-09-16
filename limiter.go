@@ -35,21 +35,25 @@ type tokenBucket struct {
 // NewLimiter creates a new Limiter with a given rate (tokens per second) and bucket capacity.
 // The bucket is initialized as full.
 func NewLimiter(rate float64, capacity float64) Limiter {
-	return &tokenBucket{
-		rate:       rate,
-		capacity:    capacity,
-		tokens:     capacity,
-		lastUpdate: time.Now(),
-	}
+	return NewLimiterWithTokens(rate, capacity, capacity)
 }
 
 // NewBurstLimiter creates a new Limiter with a given rate (tokens per second) and bucket capacity.
 // The bucket is initialized as empty, meaning the first request will be subject to the rate.
 func NewBurstLimiter(rate float64, capacity float64) Limiter {
+	return NewLimiterWithTokens(rate, capacity, 0)
+}
+
+// NewLimiterWithTokens creates a new Limiter with a given rate, capacity, and initial token count.
+// The initial tokens are capped at the capacity.
+func NewLimiterWithTokens(rate float64, capacity float64, tokens float64) Limiter {
+	if tokens > capacity {
+		tokens = capacity
+	}
 	return &tokenBucket{
 		rate:       rate,
 		capacity:    capacity,
-		tokens:     0,
+		tokens:     tokens,
 		lastUpdate: time.Now(),
 	}
 }

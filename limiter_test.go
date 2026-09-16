@@ -52,6 +52,27 @@ func TestLimiter_NewBurstLimiter(t *testing.T) {
 	}
 }
 
+func TestLimiter_NewLimiterWithTokens(t *testing.T) {
+	// Rate 10, Capacity 5, Start with 2 tokens
+	l := NewLimiterWithTokens(10, 5, 2)
+
+	for i := 0; i < 2; i++ {
+		if !l.Allow() {
+			t.Errorf("Request %d should have been allowed", i+1)
+		}
+	}
+
+	if l.Allow() {
+		t.Error("Request 3 should have been denied")
+	}
+
+	// Test capping at capacity
+	l2 := NewLimiterWithTokens(10, 5, 10)
+	if l2.Available() != 5.0 {
+		t.Errorf("Expected tokens to be capped at capacity (5), got %v", l2.Available())
+	}
+}
+
 func TestLimiter_AllowN(t *testing.T) {
 	l := NewLimiter(10, 5)
 
