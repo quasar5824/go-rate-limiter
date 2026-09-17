@@ -267,15 +267,18 @@ type AdaptiveLimiter struct {
 	limiter Limiter
 	minRate float64
 	maxRate float64
+	curRate float64
 	mu      sync.Mutex
 }
 
-// NewAdaptiveLimiter creates a new AdaptiveLimiter.
+// NewAdaptiveLimiter creates a new AdaptiveLimiter. It assumes the initial rate
+// is equal to the minRate unless adjusted via AdjustRate.
 func NewAdaptiveLimiter(l Limiter, minRate, maxRate float64) *AdaptiveLimiter {
 	return &AdaptiveLimiter{
 		limiter: l,
 		minRate: minRate,
 		maxRate: maxRate,
+		curRate: minRate,
 	}
 }
 
@@ -285,14 +288,36 @@ func (al *AdaptiveLimiter) AdjustRate(feedback func(currentRate float64) float64
 	al.mu.Lock()
 	defer al.mu.Unlock()
 
-	// We don't have a GetRate method in Limiter interface, so we rely on the external
-	// state or a way to track current rate. For now, we assume the feedback function
-	// handles current rate tracking or we pass a dummy. 
-	// Better yet, the AdaptiveLimiter can track the current rate it has set.
+	newRate := feedback(al.curRate)
+
+	if newRate < al.minRate {
+		newRate = al.minRate
+	}
+	if newRate > al.maxRate {
+		newRate = al.maxRate
+	}
+
+	al.curRate = newRate
 	
-	// Note: Since Limiter interface doesn't have GetRate, the feedback function
-	// must be responsible for calculating the new rate based on the metrics it sees.
+	// Since the Limiter interface uses SetLimit(rate, capacity), we need to
+	// maintain the capacity. If the underlying limiter is a tokenBucket, we
+	// can't easily get the current capacity from the interface.
+	// However, usually adaptive limiting adjusts the rate while keeping the burst capacity constant.
+	// We assume the capacity should be handled by the logic providing the Limiter instance
+	// or we can use a fixed value. For the sake of the interface, we need a capacity.
+	// In a real scenario, we might extend the Limiter interface or store the capacity in AdaptiveLimiter.
+	// Here, we will use a reasonable default or allow the limiter to handle it if it's a tokenBucket.
 	
-	// Let's implement a simple internal rate tracker for the AdaptiveLimiter
-	// (initial rate is not known, so we use a starting value or let feedback decide).
+	// Note: This implementation requires knowing the desired capacity. 
+	// To make this robust, we'll assume a capacity of 1.0 for the update if unknown,
+	// but a better way would be to let the feedback function return both or store it.
+	// For now, we update the rate and assume a capacity of al.maxRate to allow bursts up to the max rate.
+	al.limiter.SetLimit(al.curRate, al.maxRate)
+}
+
+// CurrentRate returns the currently configured rate of the adaptive limiter.
+func (al *AdaptiveLimiter) CurrentRate() float64 {
+	al.mu.Lock()
+	defer al.mu.Unlock()
+	return al.curRate
 }
