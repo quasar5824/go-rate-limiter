@@ -357,3 +357,53 @@ func TestWeightedLimiter(t *testing.T) {
 		}
 	}
 }
+
+func TestAdaptiveLimiter(t *testing.T) {
+	l := NewLimiter(10, 10)
+	minRate, maxRate := 5.0, 20.0
+	al := NewAdaptiveLimiter(l, minRate, maxRate)
+
+	// Initial rate should be minRate
+	if al.CurrentRate() != minRate {
+		t.Errorf("Expected initial rate %v, got %v", minRate, al.CurrentRate())
+	}
+
+	// Test increasing rate within bounds
+	al.AdjustRate(func(curr float64) float64 {
+		return curr + 5.0
+	})
+	if al.CurrentRate() != 10.0 {
+		t.Errorf("Expected rate 10.0, got %v", al.CurrentRate())
+	}
+
+	// Test capping at maxRate
+	al.AdjustRate(func(curr float64) float64 {
+		return curr + 50.0
+	})
+	if al.CurrentRate() != maxRate {
+		t.Errorf("Expected rate capped at %v, got %v", maxRate, al.CurrentRate())
+	}
+
+	// Test capping at minRate
+	al.AdjustRate(func(curr float64) float64 {
+		return curr - 100.0
+	})
+	if al.CurrentRate() != minRate {
+		t.Errorf("Expected rate capped at %v, got %v", minRate, al.CurrentRate())
+	}
+
+	// Test that SetLimit was actually called on the underlying limiter
+	// After capping at maxRate (20.0), and then adjusting back to 15.0
+	al.AdjustRate(func(curr float64) float64 {
+		return 15.0
+	})
+
+	// To verify the underlying limiter is updated, we can use Reserve
+	// Use up all tokens
+	l.AllowN(100)
+	// At 15 tokens/sec, 1 token should take ~66ms
+	wait := l.Reserve(1.0)
+	if wait < 50*time.Millisecond || wait > 80*time.Millisecond {
+		t.Errorf("Underlying limiter rate not updated. Expected ~66ms, got %v", wait)
+	}
+}
