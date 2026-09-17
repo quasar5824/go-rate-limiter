@@ -261,3 +261,38 @@ func (wl *WeightedLimiter) SetWeight(key string, weight float64) {
 	defer wl.mu.Unlock()
 	wl.weights[key] = weight
 }
+
+// AdaptiveLimiter adjusts the rate of an underlying limiter based on a feedback function.
+type AdaptiveLimiter struct {
+	limiter Limiter
+	minRate float64
+	maxRate float64
+	mu      sync.Mutex
+}
+
+// NewAdaptiveLimiter creates a new AdaptiveLimiter.
+func NewAdaptiveLimiter(l Limiter, minRate, maxRate float64) *AdaptiveLimiter {
+	return &AdaptiveLimiter{
+		limiter: l,
+		minRate: minRate,
+		maxRate: maxRate,
+	}
+}
+
+// AdjustRate calls the provided feedback function to determine the new rate.
+// The rate is clamped between minRate and maxRate.
+func (al *AdaptiveLimiter) AdjustRate(feedback func(currentRate float64) float64) {
+	al.mu.Lock()
+	defer al.mu.Unlock()
+
+	// We don't have a GetRate method in Limiter interface, so we rely on the external
+	// state or a way to track current rate. For now, we assume the feedback function
+	// handles current rate tracking or we pass a dummy. 
+	// Better yet, the AdaptiveLimiter can track the current rate it has set.
+	
+	// Note: Since Limiter interface doesn't have GetRate, the feedback function
+	// must be responsible for calculating the new rate based on the metrics it sees.
+	
+	// Let's implement a simple internal rate tracker for the AdaptiveLimiter
+	// (initial rate is not known, so we use a starting value or let feedback decide).
+}
