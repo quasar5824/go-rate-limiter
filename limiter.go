@@ -228,6 +228,170 @@ func (l *tokenBucket) WaitUntil(ctx context.Context, target time.Time) {
 	}
 }
 
+// leakyBucket implements the Limiter interface using the leaky bucket algorithm.
+// It ensures a constant output rate by scheduling requests at fixed intervals.
+type leakyBucket struct {
+	rate       float64
+	capacity    float64
+	nextFreeTime time.Time
+	mu         sync.Mutex
+}
+
+// NewLeakyLimiter creates a new LeakyBucket limiter.
+func NewLeakyLimiter(rate float64, capacity float64) Limiter {
+	return &leakyBucket{
+		rate:     rate,
+		capacity: capacity,
+		nextFreeTime: time.Now(),
+	}
+}
+
+func (l *leakyBucket) SetLimit(rate, capacity float64) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.rate = rate
+	l.capacity = capacity
+}
+
+func (l *leakyBucket) Allow() bool {
+	return l.AllowN(1.0)
+}
+
+func (l *leakyBucket) AllowN(n float64) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	now := time.Now()
+	if l.nextFreeTime.Before(now) {
+		l.nextFreeTime = now
+	}
+
+	waitDuration := time.Duration(n / l.rate * float64(time.Second))
+	executionTime := l.nextFreeTime.Add(waitDuration)
+
+	if executionTime.Sub(now).Seconds() > l.capacity/l.rate {
+		return false
+	}
+
+	l.nextFreeTime = executionTime
+	return true
+}
+
+func (l *leakyBucket) TryAllow(n float64) bool {
+	return l.AllowN(n)
+}
+
+func (l *leakyBucket) AllowWithDuration(n float64) (bool, time.Duration) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	now := time.Now()
+	if l.nextFreeTime.Before(now) {
+		l.nextFreeTime = now
+	}
+
+	waitDuration := time.Duration(n / l.rate * float64(time.Second))
+	executionTime := l.nextFreeTime.Add(waitDuration)
+
+	waitFromNow := executionTime.Sub(now)
+	if waitFromNow.Seconds() > l.capacity/l.rate {
+		return false, time.Duration(1<<63 - 1)
+	}
+
+	return false, waitFromNow
+}
+
+func (l *leakyBucket) BatchAllow(requests []float64) []bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	now := time.Now()
+	if l.nextFreeTime.Before(now) {
+		l.nextFreeTime = now
+	}
+
+	results := make([]bool, len(requests))
+	for i, n := range requests {
+		waitDuration := time.Duration(n / l.rate * float64(time.Second))
+		executionTime := l.nextFreeTime.Add(waitDuration)
+
+		if executionTime.Sub(now).Seconds() > l.capacity/l.rate {
+			results[i] = false
+		} else {
+			l.nextFreeTime = executionTime
+			results[i] = true
+		}
+	}
+	return results
+}
+
+func (l *leakyBucket) Available() float64 {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	
+	now := time.Now()
+	if l.nextFreeTime.Before(now) {
+		return l.capacity
+	}
+	
+	remainingCapacitySeconds := (l.capacity / l.rate) - l.nextFreeTime.Sub(now).Seconds()
+	return remainingCapacitySeconds * l.rate
+}
+
+func (l *leakyBucket) Peek() float64 {
+	return l.Available()
+}
+
+func (l *leakyBucket) Reserve(n float64) time.Duration {
+	return l.ReserveN(n)
+}
+
+func (l *leakyBucket) ReserveN(n float64) time.Duration {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	now := time.Now()
+	if l.nextFreeTime.Before(now) {
+		l.nextFreeTime = now
+	}
+
+	waitDuration := time.Duration(n / l.rate * float64(time.Second))
+	executionTime := l.nextFreeTime.Add(waitDuration)
+	l.nextFreeTime = executionTime
+
+	return executionTime.Sub(now)
+}
+
+func (l *leakyBucket) Wait() {
+	l.WaitN(context.Background(), 1.0)
+}
+
+func (l *leakyBucket) WaitN(ctx context.Context, n float64) {
+	waitDuration := l.ReserveN(n)
+	if waitDuration <= 0 {
+		return
+	}
+
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(waitDuration):
+	}
+}
+
+func (l *leakyBucket) WaitUntil(ctx context.Context, target time.Time) {
+	now := time.Now()
+	if target.Before(now) {
+		return
+	}
+
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(target.Sub(now)):
+	}
+}
+
 // WeightedLimiter is a wrapper around Limiter that assigns weights to different operation keys.
 type WeightedLimiter struct {
 	limiter Limiter

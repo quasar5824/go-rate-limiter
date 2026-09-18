@@ -407,3 +407,42 @@ func TestAdaptiveLimiter(t *testing.T) {
 		t.Errorf("Underlying limiter rate not updated. Expected ~66ms, got %v", wait)
 	}
 }
+
+func TestLeakyLimiter(t *testing.T) {
+	// Rate 10/s, capacity for 2 seconds (20 tokens)
+	l := NewLeakyLimiter(10, 20)
+
+	// First request should be immediate
+	if !l.Allow() {
+		t.Error("First request should be allowed")
+	}
+
+	// Second request should be allowed, but it's scheduled 100ms later
+	if !l.Allow() {
+		t.Error("Second request should be allowed")
+	}
+
+	// Check that it is indeed scheduling: Reserve for 1 token should now be ~100ms
+	wait := l.Reserve(1.0)
+	if wait < 80*time.Millisecond || wait > 120*time.Millisecond {
+		t.Errorf("Expected reserve to be ~100ms, got %v", wait)
+	}
+
+	// Test capacity limit
+	l2 := NewLeakyLimiter(10, 1)
+	// Fill the 1-second capacity (10 tokens)
+	for i := 0; i < 10; i++ {
+		l2.Allow()
+	}
+
+	// 11th request should exceed capacity (scheduled > 1s from now)
+	if l2.Allow() {
+		t.Error("Request 11 should have been denied due to capacity")
+	}
+
+	// Wait for some leak (500ms = 5 tokens capacity recovered)
+	time.Sleep(500 * time.Millisecond)
+	if !l2.Allow() {
+		t.Error("Request after leak should be allowed")
+	}
+}
