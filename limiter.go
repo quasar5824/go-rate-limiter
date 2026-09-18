@@ -2,6 +2,7 @@ package ratelimit
 
 import (
 	"context"
+	"sort"
 	"sync"
 	"time"
 )
@@ -428,17 +429,10 @@ func (l *slidingWindow) AllowN(n float64) bool {
 	now := time.Now()
 	windowStart := now.Add(-l.window)
 
-	// Clean up old logs
-	validIdx := 0
-	for i, t := range l.logs {
-		if t.After(windowStart) {
-			validIdx = i
-			break
-		}
-		if i == len(l.logs)-1 {
-			validIdx = len(l.logs)
-		}
-	}
+	// Clean up old logs using binary search for efficiency
+	validIdx := sort.Search(len(l.logs), func(i int) bool {
+		return l.logs[i].After(windowStart)
+	})
 	l.logs = l.logs[validIdx:]
 
 	if float64(len(l.logs)) + n <= l.capacity {
@@ -461,16 +455,9 @@ func (l *slidingWindow) AllowWithDuration(n float64) (bool, time.Duration) {
 	now := time.Now()
 	windowStart := now.Add(-l.window)
 
-	validIdx := 0
-	for i, t := range l.logs {
-		if t.After(windowStart) {
-			validIdx = i
-			break
-		}
-		if i == len(l.logs)-1 {
-			validIdx = len(l.logs)
-		}
-	}
+	validIdx := sort.Search(len(l.logs), func(i int) bool {
+		return l.logs[i].After(windowStart)
+	})
 	l.logs = l.logs[validIdx:]
 
 	if float64(len(l.logs)) + n <= l.capacity {
@@ -496,16 +483,9 @@ func (l *slidingWindow) BatchAllow(requests []float64) []bool {
 	now := time.Now()
 	windowStart := now.Add(-l.window)
 
-	validIdx := 0
-	for i, t := range l.logs {
-		if t.After(windowStart) {
-			validIdx = i
-			break
-		}
-		if i == len(l.logs)-1 {
-			validIdx = len(l.logs)
-		}
-	}
+	validIdx := sort.Search(len(l.logs), func(i int) bool {
+		return l.logs[i].After(windowStart)
+	})
 	l.logs = l.logs[validIdx:]
 
 	results := make([]bool, len(requests))
@@ -529,13 +509,11 @@ func (l *slidingWindow) Available() float64 {
 	now := time.Now()
 	windowStart := now.Add(-l.window)
 	
-	count := 0
-	for _, t := range l.logs {
-		if t.After(windowStart) {
-			count++
-		}
-	}
-	return l.capacity - float64(count)
+	validIdx := sort.Search(len(l.logs), func(i int) bool {
+		return l.logs[i].After(windowStart)
+	})
+	
+	return l.capacity - float64(len(l.logs)-validIdx)
 }
 
 func (l *slidingWindow) Peek() float64 {
@@ -553,16 +531,9 @@ func (l *slidingWindow) ReserveN(n float64) time.Duration {
 	now := time.Now()
 	windowStart := now.Add(-l.window)
 
-	validIdx := 0
-	for i, t := range l.logs {
-		if t.After(windowStart) {
-			validIdx = i
-			break
-		}
-		if i == len(l.logs)-1 {
-			validIdx = len(l.logs)
-		}
-	}
+	validIdx := sort.Search(len(l.logs), func(i int) bool {
+		return l.logs[i].After(windowStart)
+	})
 	l.logs = l.logs[validIdx:]
 
 	if float64(len(l.logs)) + n <= l.capacity {

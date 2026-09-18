@@ -477,3 +477,27 @@ func TestSlidingWindowLimiter(t *testing.T) {
 		t.Error("Request after window slide should be allowed")
 	}
 }
+
+func TestSlidingWindowLimiter_ReserveFairness(t *testing.T) {
+	// Limit: 2 requests per 500ms
+	l := NewSlidingWindowLimiter(2, 500*time.Millisecond)
+
+	// Fill window
+	l.Allow()
+	l.Allow()
+
+	// Reserve 1st extra token. Should wait until t=0+500ms
+	wait1 := l.Reserve(1.0)
+	if wait1 < 400*time.Millisecond || wait1 > 600*time.Millisecond {
+		t.Errorf("First reservation duration unexpected: %v", wait1)
+	}
+
+	// Reserve 2nd extra token. Should wait until t=1+500ms
+	wait2 := l.Reserve(1.0)
+	if wait2 <= wait1 {
+		t.Errorf("Second reservation should be later than first. wait1: %v, wait2: %v", wait1, wait2)
+	}
+	if wait2 < 900*time.Millisecond || wait2 > 1100*time.Millisecond {
+		t.Errorf("Second reservation duration unexpected: %v", wait2)
+	}
+}
