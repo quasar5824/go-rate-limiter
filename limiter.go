@@ -392,6 +392,230 @@ func (l *leakyBucket) WaitUntil(ctx context.Context, target time.Time) {
 	}
 }
 
+// slidingWindow implements the Limiter interface using a sliding window log.
+// It provides precise rate limiting by tracking individual request timestamps.
+type slidingWindow struct {
+	window   time.Duration
+	capacity float64
+	mu       sync.Mutex
+	logs     []time.Time
+}
+
+// NewSlidingWindowLimiter creates a new SlidingWindowLimiter.
+// rate is treated as total allowed requests per the window duration.
+func NewSlidingWindowLimiter(rate float64, window time.Duration) Limiter {
+	return &slidingWindow{
+		window:   window,
+		capacity: rate,
+		logs:     make([]time.Time, 0),
+	}
+}
+
+func (l *slidingWindow) SetLimit(rate, capacity float64) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.capacity = rate // In sliding window, capacity is the limit per window
+}
+
+func (l *slidingWindow) Allow() bool {
+	return l.AllowN(1.0)
+}
+
+func (l *slidingWindow) AllowN(n float64) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	now := time.Now()
+	windowStart := now.Add(-l.window)
+
+	// Clean up old logs
+	validIdx := 0
+	for i, t := range l.logs {
+		if t.After(windowStart) {
+			validIdx = i
+			break
+		}
+		if i == len(l.logs)-1 {
+			validIdx = len(l.logs)
+		}
+	}
+	l.logs = l.logs[validIdx:]
+
+	if float64(len(l.logs)) + n <= l.capacity {
+		for i := 0; i < int(n); i++ {
+			l.logs = append(l.logs, now)
+		}
+		return true
+	}
+	return false
+}
+
+func (l *slidingWindow) TryAllow(n float64) bool {
+	return l.AllowN(n)
+}
+
+func (l *slidingWindow) AllowWithDuration(n float64) (bool, time.Duration) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	now := time.Now()
+	windowStart := now.Add(-l.window)
+
+	validIdx := 0
+	for i, t := range l.logs {
+		if t.After(windowStart) {
+			validIdx = i
+			break
+		}
+		if i == len(l.logs)-1 {
+			validIdx = len(l.logs)
+		}
+	}
+	l.logs = l.logs[validIdx:]
+
+	if float64(len(l.logs)) + n <= l.capacity {
+		for i := 0; i < int(n); i++ {
+			l.logs = append(l.logs, now)
+		}
+		return true, 0
+	}
+
+	if len(l.logs) == 0 {
+		return false, time.Duration(1<<63 - 1)
+	}
+
+	// Wait until the oldest token falls out of the window
+	waitDuration := l.logs[0].Add(l.window).Sub(now)
+	return false, waitDuration
+}
+
+func (l *slidingWindow) BatchAllow(requests []float64) []bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	now := time.Now()
+	windowStart := now.Add(-l.window)
+
+	validIdx := 0
+	for i, t := range l.logs {
+		if t.After(windowStart) {
+			validIdx = i
+			break
+		}
+		if i == len(l.logs)-1 {
+			validIdx = len(l.logs)
+		}
+	}
+	l.logs = l.logs[validIdx:]
+
+	results := make([]bool, len(requests))
+	for i, n := range requests {
+		if float64(len(l.logs)) + n <= l.capacity {
+			for j := 0; j < int(n); j++ {
+				l.logs = append(l.logs, now)
+			}
+			results[i] = true
+		} else {
+			results[i] = false
+		}
+	}
+	return results
+}
+
+func (l *slidingWindow) Available() float64 {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	now := time.Now()
+	windowStart := now.Add(-l.window)
+	
+	count := 0
+	for _, t := range l.logs {
+		if t.After(windowStart) {
+			count++
+		}
+	}
+	return l.capacity - float64(count)
+}
+
+func (l *slidingWindow) Peek() float64 {
+	return l.Available()
+}
+
+func (l *slidingWindow) Reserve(n float64) time.Duration {
+	return l.ReserveN(n)
+}
+
+func (l *slidingWindow) ReserveN(n float64) time.Duration {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	now := time.Now()
+	windowStart := now.Add(-l.window)
+
+	validIdx := 0
+	for i, t := range l.logs {
+		if t.After(windowStart) {
+			validIdx = i
+			break
+		}
+		if i == len(l.logs)-1 {
+			validIdx = len(l.logs)
+		}
+	}
+	l.logs = l.logs[validIdx:]
+
+	if float64(len(l.logs)) + n <= l.capacity {
+		for i := 0; i < int(n); i++ {
+			l.logs = append(l.logs, now)
+		}
+		return 0
+	}
+
+	// Reserve tokens by adding them to the log as if they happened now,
+	// even if they exceed capacity. This ensures fairness.
+	for i := 0; i < int(n); i++ {
+		l.logs = append(l.logs, now)
+	}
+
+	// The wait duration is until the oldest tokens that make this request 'over capacity' expire.
+	numToExpire := int(float64(len(l.logs)) - l.capacity)
+	if numToExpire <= 0 {
+		return 0
+	}
+	return l.logs[numToExpire-1].Add(l.window).Sub(now)
+}
+
+func (l *slidingWindow) Wait() {
+	l.WaitN(context.Background(), 1.0)
+}
+
+func (l *slidingWindow) WaitN(ctx context.Context, n float64) {
+	waitDuration := l.ReserveN(n)
+	if waitDuration <= 0 {
+		return
+	}
+
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(waitDuration):
+	}
+}
+
+func (l *slidingWindow) WaitUntil(ctx context.Context, target time.Time) {
+	now := time.Now()
+	if target.Before(now) {
+		return
+	}
+
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(target.Sub(now)):
+	}
+}
+
 // WeightedLimiter is a wrapper around Limiter that assigns weights to different operation keys.
 type WeightedLimiter struct {
 	limiter Limiter

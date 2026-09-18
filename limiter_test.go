@@ -446,3 +446,34 @@ func TestLeakyLimiter(t *testing.T) {
 		t.Error("Request after leak should be allowed")
 	}
 }
+
+func TestSlidingWindowLimiter(t *testing.T) {
+	// Limit: 5 requests per 500ms
+	l := NewSlidingWindowLimiter(5, 500*time.Millisecond)
+
+	// First 5 should be allowed
+	for i := 0; i < 5; i++ {
+		if !l.Allow() {
+			t.Errorf("Request %d should have been allowed", i+1)
+		}
+	}
+
+	// 6th should be denied
+	if l.Allow() {
+		t.Error("6th request should be denied")
+	}
+
+	// Wait for 300ms. 5 requests were made at t=0. 
+	// At t=300ms, all 5 are still in the window [300ms-500ms, 300ms].
+	time.Sleep(300 * time.Millisecond)
+	if l.Allow() {
+		t.Error("Request at 300ms should still be denied")
+	}
+
+	// Wait another 250ms (total 550ms). 
+	// Window is [50ms, 550ms]. Original requests at t=0 are now gone.
+	time.Sleep(250 * time.Millisecond)
+	if !l.Allow() {
+		t.Error("Request after window slide should be allowed")
+	}
+}
