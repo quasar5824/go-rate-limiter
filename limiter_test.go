@@ -531,3 +531,66 @@ func TestClusterLimiter(t *testing.T) {
 		t.Errorf("Unexpected cluster reserve wait: %v", wait)
 	}
 }
+
+func TestKeyedLimiter(t *testing.T) {
+	factory := func() Limiter {
+		return NewLimiter(10, 5)
+	}
+	kl := NewKeyedLimiter(factory)
+
+	userA := "user-a"
+	userB := "user-b"
+
+	// User A should be allowed 5 requests
+	for i := 0; i < 5; i++ {
+		if !kl.Allow(userA) {
+			t.Errorf("User A request %d should be allowed", i+1)
+		}
+	}
+	
+	// User A 6th request denied
+	if kl.Allow(userA) {
+		t.Error("User A 6th request should be denied")
+	}
+
+	// User B should still be allowed 5 requests independently
+	for i := 0; i < 5; i++ {
+		if !kl.Allow(userB) {
+			t.Errorf("User B request %d should be allowed", i+1)
+		}
+	}
+
+	// Test AllowN for keyed limiter
+	userC := "user-c"
+	if !kl.AllowN(userC, 3.0) {
+		t.Error("User C request for 3 tokens should be allowed")
+	}
+	if kl.AllowN(userC, 3.0) {
+		t.Error("User C second request for 3 tokens should be denied (only 2 left)")
+	}
+
+	// Test Reserve for keyed limiter
+	userD := "user-d"
+	kl.AllowN(userD, 5.0)
+	wait := kl.Reserve(userD, 1.0)
+	if wait < 80*time.Millisecond || wait > 120*time.Millisecond {
+		t.Errorf("User D reserve duration unexpected: %v", wait)
+	}
+
+	// Test Wait for keyed limiter
+	userE := "user-e"
+	kl.AllowN(userE, 5.0)
+	start := time.Now()
+	kl.Wait(context.Background(), userE, 1.0)
+	elapsed := time.Since(start)
+	if elapsed < 80*time.Millisecond {
+		t.Errorf("User E Wait returned too early: %v", elapsed)
+	}
+
+	// Test Remove
+	kl.Remove(userA)
+	// After removal, userA should get a fresh limiter
+	if !kl.Allow(userA) {
+		t.Error("User A should be allowed after limiter removal")
+	}
+}

@@ -74,7 +74,7 @@ func (l *tokenBucket) refill() {
 }
 
 // SetLimit updates the rate and capacity of the limiter.
-func (l *tokenBucket) SetLimit(rate float64, capacity float64) {
+func (l *tokenBucket) SetLimit(rate, capacity float64) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -833,4 +833,69 @@ func (cl *ClusterLimiter) Capacity() float64 {
 		}
 	}
 	return minCap
+}
+
+// KeyedLimiter manages multiple limiters identified by a string key.
+type KeyedLimiter struct {
+	factory func() Limiter
+	limiters map[string]Limiter
+	mu      sync.RWMutex
+}
+
+// NewKeyedLimiter creates a new KeyedLimiter that uses the provided factory to create limiters for new keys.
+func NewKeyedLimiter(factory func() Limiter) *KeyedLimiter {
+	return &KeyedLimiter{
+		factory:  factory,
+		limiters: make(map[string]Limiter),
+	}
+}
+
+// getLimiter returns the limiter for the given key, creating one if it doesn't exist.
+func (kl *KeyedLimiter) getLimiter(key string) Limiter {
+	kl.mu.RLock()
+	l, ok := kl.limiters[key]
+	kl.mu.RUnlock()
+
+	if ok {
+		return l
+	}
+
+	kl.mu.Lock()
+	defer kl.mu.Unlock()
+
+	// Double-check after acquiring write lock
+	if l, ok = kl.limiters[key]; ok {
+		return l
+	}
+
+	l = kl.factory()
+	kl.limiters[key] = l
+	return l
+}
+
+// Allow checks if the request for the given key is allowed.
+func (kl *KeyedLimiter) Allow(key string) bool {
+	return kl.getLimiter(key).Allow()
+}
+
+// AllowN checks if the request for the given key requiring n tokens is allowed.
+func (kl *KeyedLimiter) AllowN(key string, n float64) bool {
+	return kl.getLimiter(key).AllowN(n)
+}
+
+// Reserve reserves tokens for the given key.
+func (kl *KeyedLimiter) Reserve(key string, n float64) time.Duration {
+	return kl.getLimiter(key).ReserveN(n)
+}
+
+// Wait blocks until tokens are available for the given key.
+func (kl *KeyedLimiter) Wait(ctx context.Context, key string, n float64) {
+	kl.getLimiter(key).WaitN(ctx, n)
+}
+
+// Remove deletes the limiter for the given key, freeing memory.
+func (kl *KeyedLimiter) Remove(key string) {
+	kl.mu.Lock()
+	defer kl.mu.Unlock()
+	delete(kl.limiters, key)
 }
