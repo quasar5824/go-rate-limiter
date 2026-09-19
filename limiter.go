@@ -688,3 +688,149 @@ func (al *AdaptiveLimiter) CurrentRate() float64 {
 	defer al.mu.Unlock()
 	return al.curRate
 }
+
+// ClusterLimiter aggregates multiple limiters. A request is allowed only if it
+// is allowed by all underlying limiters.
+type ClusterLimiter struct {
+	limiters []Limiter
+}
+
+// NewClusterLimiter creates a new ClusterLimiter from a slice of limiters.
+func NewClusterLimiter(limiters ...Limiter) Limiter {
+	return &ClusterLimiter{
+		limiters: limiters,
+	}
+}
+
+func (cl *ClusterLimiter) Allow() bool {
+	return cl.AllowN(1.0)
+}
+
+func (cl *ClusterLimiter) AllowN(n float64) bool {
+	// Check all first to avoid partial consumption
+	for _, l := range cl.limiters {
+		if !l.TryAllow(0) { // Peek-like check if we had a TryAllow without consumption
+			// Note: The current Limiter interface doesn't have a non-consuming check for N
+			// except Available(). We use Available() for this purpose.
+			if l.Available() < n {
+				return false
+			}
+		}
+	}
+
+	// Consume from all
+	for _, l := range cl.limiters {
+		if !l.AllowN(n) {
+			// This is a race condition: a limiter that was Available() might now be empty.
+			// In a truly distributed system, we'd need a 2-phase commit or similar.
+			// For this implementation, we accept that some tokens might be consumed
+			// even if the overall request is denied.
+			return false
+		}
+	}
+	return true
+}
+
+func (cl *ClusterLimiter) TryAllow(n float64) bool {
+	return cl.AllowN(n)
+}
+
+func (cl *ClusterLimiter) AllowWithDuration(n float64) (bool, time.Duration) {
+	var maxWait time.Duration
+	for _, l := range cl.limiters {
+		allowed, wait := l.AllowWithDuration(n)
+		if !allowed {
+			if wait > maxWait {
+				maxWait = wait
+			}
+			return false, maxWait
+		}
+		// We cannot easily 'un-consume' if a subsequent limiter denies
+		// without complex logic. This implementation is primarily for non-blocking checks.
+	}
+	return true, 0
+}
+
+func (cl *ClusterLimiter) BatchAllow(requests []float64) []bool {
+	results := make([]bool, len(requests))
+	for i, n := range requests {
+		results[i] = cl.AllowN(n)
+	}
+	return results
+}
+
+func (cl *ClusterLimiter) Available() float64 {
+	minAvail := 1e18
+	for _, l := range cl.limiters {
+		avail := l.Available()
+		if avail < minAvail {
+			minAvail = avail
+		}
+	}
+	return minAvail
+}
+
+func (cl *ClusterLimiter) Peek() float64 {
+	return cl.Available()
+}
+
+func (cl *ClusterLimiter) Reserve(n float64) time.Duration {
+	return cl.ReserveN(n)
+}
+
+func (cl *ClusterLimiter) ReserveN(n float64) time.Duration {
+	var maxWait time.Duration
+	for _, l := range cl.limiters {
+		wait := l.ReserveN(n)
+		if wait > maxWait {
+			maxWait = wait
+		}
+	}
+	return maxWait
+}
+
+func (cl *ClusterLimiter) Wait() {
+	cl.WaitN(context.Background(), 1.0)
+}
+
+func (cl *ClusterLimiter) WaitN(ctx context.Context, n float64) {
+	waitDuration := cl.ReserveN(n)
+	if waitDuration <= 0 {
+		return
+	}
+
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(waitDuration):
+	}
+}
+
+func (cl *ClusterLimiter) WaitUntil(ctx context.Context, target time.Time) {
+	now := time.Now()
+	if target.Before(now) {
+		return
+	}
+
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(target.Sub(now)):
+	}
+}
+
+func (cl *ClusterLimiter) SetLimit(rate, capacity float64) {
+	// ClusterLimiter doesn't have a single rate/capacity. 
+	// This is a no-op or could be implemented to update all underlying limiters if they support it.
+}
+
+func (cl *ClusterLimiter) Capacity() float64 {
+	minCap := 1e18
+	for _, l := range cl.limiters {
+		cap := l.Capacity()
+		if cap < minCap {
+			minCap = cap
+		}
+	}
+	return minCap
+}

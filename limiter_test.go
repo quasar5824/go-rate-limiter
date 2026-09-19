@@ -501,3 +501,33 @@ func TestSlidingWindowLimiter_ReserveFairness(t *testing.T) {
 		t.Errorf("Second reservation duration unexpected: %v", wait2)
 	}
 }
+
+func TestClusterLimiter(t *testing.T) {
+	l1 := NewLimiter(10, 10)
+	l2 := NewLimiter(5, 5)
+	cl := NewClusterLimiter(l1, l2)
+
+	// Should allow up to 5 requests (limited by l2)
+	for i := 0; i < 5; i++ {
+		if !cl.Allow() {
+			t.Errorf("Request %d should have been allowed", i+1)
+		}
+	}
+
+	// 6th should be denied by l2
+	if cl.Allow() {
+		t.Error("Request 6 should have been denied by l2")
+	}
+
+	// Test Available returns minimum
+	if cl.Available() != 0 {
+		t.Errorf("Expected 0 available, got %v", cl.Available())
+	}
+
+	// Test Reserve returns max wait
+	// l2 needs 1 token, rate is 5/s -> 200ms
+	wait := cl.Reserve(1.0)
+	if wait < 150*time.Millisecond || wait > 250*time.Millisecond {
+		t.Errorf("Unexpected cluster reserve wait: %v", wait)
+	}
+}
