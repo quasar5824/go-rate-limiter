@@ -22,6 +22,7 @@ type Limiter interface {
 	WaitN(ctx context.Context, n float64)
 	WaitUntil(ctx context.Context, target time.Time)
 	SetLimit(rate, capacity float64)
+	Capacity() float64
 }
 
 // tokenBucket implements the Limiter interface using the token bucket algorithm.
@@ -82,6 +83,13 @@ func (l *tokenBucket) SetLimit(rate float64, capacity float64) {
 	if l.tokens > capacity {
 		l.tokens = capacity
 	}
+}
+
+// Capacity returns the maximum capacity of the bucket.
+func (l *tokenBucket) Capacity() float64 {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.capacity
 }
 
 // Allow checks if a request is allowed based on current token availability.
@@ -254,6 +262,12 @@ func (l *leakyBucket) SetLimit(rate, capacity float64) {
 	l.capacity = capacity
 }
 
+func (l *leakyBucket) Capacity() float64 {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.capacity
+}
+
 func (l *leakyBucket) Allow() bool {
 	return l.AllowN(1.0)
 }
@@ -416,6 +430,12 @@ func (l *slidingWindow) SetLimit(rate, capacity float64) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.capacity = rate // In sliding window, capacity is the limit per window
+}
+
+func (l *slidingWindow) Capacity() float64 {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.capacity
 }
 
 func (l *slidingWindow) Allow() bool {
@@ -623,21 +643,23 @@ func (wl *WeightedLimiter) SetWeight(key string, weight float64) {
 
 // AdaptiveLimiter adjusts the rate of an underlying limiter based on a feedback function.
 type AdaptiveLimiter struct {
-	limiter Limiter
-	minRate float64
-	maxRate float64
-	curRate float64
-	mu      sync.Mutex
+	limiter  Limiter
+	minRate  float64
+	maxRate  float64
+	curRate  float64
+	capacity float64
+	mu       sync.Mutex
 }
 
 // NewAdaptiveLimiter creates a new AdaptiveLimiter. It assumes the initial rate
 // is equal to the minRate unless adjusted via AdjustRate.
 func NewAdaptiveLimiter(l Limiter, minRate, maxRate float64) *AdaptiveLimiter {
 	return &AdaptiveLimiter{
-		limiter: l,
-		minRate: minRate,
-		maxRate: maxRate,
-		curRate: minRate,
+		limiter:  l,
+		minRate:  minRate,
+		maxRate:  maxRate,
+		curRate:  minRate,
+		capacity: l.Capacity(),
 	}
 }
 
@@ -657,21 +679,7 @@ func (al *AdaptiveLimiter) AdjustRate(feedback func(currentRate float64) float64
 	}
 
 	al.curRate = newRate
-	
-	// Since the Limiter interface uses SetLimit(rate, capacity), we need to
-	// maintain the capacity. If the underlying limiter is a tokenBucket, we
-	// can't easily get the current capacity from the interface.
-	// However, usually adaptive limiting adjusts the rate while keeping the burst capacity constant.
-	// We assume the capacity should be handled by the logic providing the Limiter instance
-	// or we can use a fixed value. For the sake of the interface, we need a capacity.
-	// In a real scenario, we might extend the Limiter interface or store the capacity in AdaptiveLimiter.
-	// Here, we will use a reasonable default or allow the limiter to handle it if it's a tokenBucket.
-	
-	// Note: This implementation requires knowing the desired capacity. 
-	// To make this robust, we'll assume a capacity of 1.0 for the update if unknown,
-	// but a better way would be to let the feedback function return both or store it.
-	// For now, we update the rate and assume a capacity of al.maxRate to allow bursts up to the max rate.
-	al.limiter.SetLimit(al.curRate, al.maxRate)
+	al.limiter.SetLimit(al.curRate, al.capacity)
 }
 
 // CurrentRate returns the currently configured rate of the adaptive limiter.
