@@ -708,6 +708,7 @@ func (cl *ClusterLimiter) Allow() bool {
 
 func (cl *ClusterLimiter) AllowN(n float64) bool {
 	// Pre-flight check: ensure all limiters have enough tokens available
+	// This reduces the probability of partial consumption (token leakage)
 	for _, l := range cl.limiters {
 		if l.Available() < n {
 			return false
@@ -716,10 +717,9 @@ func (cl *ClusterLimiter) AllowN(n float64) bool {
 
 	// Consume from all. Since we checked Available() first, the chance of failure
 	// is reduced, but still possible due to races between Available() and AllowN().
+	// Note: If a later limiter denies, tokens from previous limiters are leaked.
 	for _, l := range cl.limiters {
 		if !l.AllowN(n) {
-			// In a local implementation, if one fails, we cannot easily roll back
-			// others without implementing a transactional interface.
 			return false
 		}
 	}
