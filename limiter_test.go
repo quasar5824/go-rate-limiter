@@ -594,3 +594,29 @@ func TestKeyedLimiter(t *testing.T) {
 		t.Error("User A should be allowed after limiter removal")
 	}
 }
+
+func TestPriorityLimiter(t *testing.T) {
+	l := NewLimiter(10, 10)
+	shares := map[int]float64{
+		0: 0.5, // High priority: 5 tokens guaranteed
+		1: 0.5, // Low priority: 5 tokens guaranteed
+	}
+	pl := NewPriorityLimiter(l, shares)
+
+	// High priority should be allowed to use almost all tokens
+	for i := 0; i < 9; i++ {
+		if !pl.AllowPriority(0, 1.0) {
+			t.Errorf("High priority request %d should be allowed", i+1)
+		}
+	}
+	
+	// Low priority should be blocked because only 1 token left < 5 tokens guaranteed for High priority
+	if pl.AllowPriority(1, 1.0) {
+		t.Error("Low priority request should be denied when tokens fall below higher priority floors")
+	}
+
+	// High priority should still be able to take the last token
+	if !pl.AllowPriority(0, 1.0) {
+		t.Error("High priority should be able to take the last token")
+	}
+}

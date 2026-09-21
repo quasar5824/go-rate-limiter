@@ -903,3 +903,59 @@ func (kl *KeyedLimiter) Remove(key string) {
 	defer kl.mu.Unlock()
 	delete(kl.limiters, key)
 }
+
+// PriorityLimiter distributes tokens across different priority levels.
+// Higher priority levels can consume tokens assigned to lower priorities.
+type PriorityLimiter struct {
+	limiter Limiter
+	shares  map[int]float64 // priority -> % of total capacity/rate available
+	mu      sync.RWMutex
+}
+
+// NewPriorityLimiter creates a PriorityLimiter. shares map should sum to 1.0.
+func NewPriorityLimiter(l Limiter, shares map[int]float64) *PriorityLimiter {
+	return &PriorityLimiter{
+		limiter: l,
+		shares:  shares,
+	}
+}
+
+// AllowPriority checks if a request with a given priority is allowed.
+// High priority requests (smaller int) are allowed if their share is available,
+// or if they can 'borrow' from lower priorities.
+func (pl *PriorityLimiter) AllowPriority(priority int, n float64) bool {
+	pl.mu.RLock()
+	defer pl.mu.RUnlock()
+
+	totalAvailable := pl.limiter.Available()
+	
+	// Calculate how many tokens are currently 'reserved' for higher priorities
+	// In a simple share model, we allow a priority if the total available exceeds
+	// the combined minimum requirements of all priorities higher than it.
+	// However, for a simpler implementation, we use the share to determine
+	// a minimum guaranteed floor.
+	
+	share, ok := pl.shares[priority]
+	if !ok {
+		return pl.limiter.AllowN(n) // Fallback to default
+	}
+
+	// Guaranteed minimum for this priority
+	guaranteed := pl.limiter.Capacity() * share
+	
+	// We allow if (totalAvailable) is enough for the request, 
+	// but we only block low priority if available tokens fall below the sum of higher priority shares.
+	var higherPriorityShare float64
+	for p, s := range pl.shares {
+		if p < priority {
+			higherPriorityShare += s
+		}
+	}
+
+	minFloor := pl.limiter.Capacity() * higherPriorityShare
+	if totalAvailable-n < minFloor {
+		return false
+	}
+
+	return pl.limiter.AllowN(n)
+}
