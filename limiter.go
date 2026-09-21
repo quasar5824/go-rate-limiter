@@ -707,24 +707,19 @@ func (cl *ClusterLimiter) Allow() bool {
 }
 
 func (cl *ClusterLimiter) AllowN(n float64) bool {
-	// Check all first to avoid partial consumption
+	// Pre-flight check: ensure all limiters have enough tokens available
 	for _, l := range cl.limiters {
-		if !l.TryAllow(0) { // Peek-like check if we had a TryAllow without consumption
-			// Note: The current Limiter interface doesn't have a non-consuming check for N
-			// except Available(). We use Available() for this purpose.
-			if l.Available() < n {
-				return false
-			}
+		if l.Available() < n {
+			return false
 		}
 	}
 
-	// Consume from all
+	// Consume from all. Since we checked Available() first, the chance of failure
+	// is reduced, but still possible due to races between Available() and AllowN().
 	for _, l := range cl.limiters {
 		if !l.AllowN(n) {
-			// This is a race condition: a limiter that was Available() might now be empty.
-			// In a truly distributed system, we'd need a 2-phase commit or similar.
-			// For this implementation, we accept that some tokens might be consumed
-			// even if the overall request is denied.
+			// In a local implementation, if one fails, we cannot easily roll back
+			// others without implementing a transactional interface.
 			return false
 		}
 	}
@@ -738,15 +733,24 @@ func (cl *ClusterLimiter) TryAllow(n float64) bool {
 func (cl *ClusterLimiter) AllowWithDuration(n float64) (bool, time.Duration) {
 	var maxWait time.Duration
 	for _, l := range cl.limiters {
-		allowed, wait := l.AllowWithDuration(n)
-		if !allowed {
-			if wait > maxWait {
-				maxWait = wait
+		// We use Available() to check instead of AllowWithDuration because
+		// we must NOT consume tokens if any other limiter in the cluster denies.
+		if l.Available() < n {
+			allowed, wait := l.AllowWithDuration(n)
+			if !allowed {
+				if wait > maxWait {
+					maxWait = wait
+				}
+				return false, maxWait
 			}
-			return false, maxWait
 		}
-		// We cannot easily 'un-consume' if a subsequent limiter denies
-		// without complex logic. This implementation is primarily for non-blocking checks.
+	}
+	// If all passed the Available() check, we attempt to consume from all.
+	// Note: This part still has the same race as AllowN.
+	for _, l := range cl.limiters {
+		if !l.AllowN(n) {
+			return false, time.Duration(1<<63 - 1)
+		}
 	}
 	return true, 0
 }
