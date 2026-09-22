@@ -920,6 +920,13 @@ func NewPriorityLimiter(l Limiter, shares map[int]float64) *PriorityLimiter {
 	}
 }
 
+// SetShares updates the priority shares map.
+func (pl *PriorityLimiter) SetShares(shares map[int]float64) {
+	pl.mu.Lock()
+	defer pl.mu.Unlock()
+	pl.shares = shares
+}
+
 // AllowPriority checks if a request with a given priority is allowed.
 // High priority requests (smaller int) are allowed if their share is available,
 // or if they can 'borrow' from lower priorities.
