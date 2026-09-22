@@ -736,17 +736,20 @@ func (cl *ClusterLimiter) TryAllow(n float64) bool {
 func (cl *ClusterLimiter) AllowWithDuration(n float64) (bool, time.Duration) {
 	var maxWait time.Duration
 	for _, l := range cl.limiters {
-		if l.Available() < n {
-			allowed, wait := l.AllowWithDuration(n)
-			if !allowed {
-				if wait > maxWait {
-					maxWait = wait
-				}
-				return false, maxWait
+		allowed, wait := l.AllowWithDuration(n)
+		if !allowed {
+			if wait > maxWait {
+				maxWait = wait
 			}
 		}
 	}
-	// If all passed the Available() check, we attempt to consume from all.
+
+	if maxWait > 0 {
+		return false, maxWait
+	}
+
+	// If all passed the AllowWithDuration check (meaning they are all available),
+	// we attempt to consume from all.
 	if cl.AllowN(n) {
 		return true, 0
 	}
