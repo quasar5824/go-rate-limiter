@@ -708,20 +708,23 @@ func (cl *ClusterLimiter) Allow() bool {
 
 func (cl *ClusterLimiter) AllowN(n float64) bool {
 	// Pre-flight check: ensure all limiters have enough tokens available
-	// This reduces the probability of partial consumption (token leakage)
 	for _, l := range cl.limiters {
 		if l.Available() < n {
 			return false
 		}
 	}
 
-	// Consume from all. Since we checked Available() first, the chance of failure
-	// is reduced, but still possible due to races between Available() and AllowN().
-	// Note: If a later limiter denies, tokens from previous limiters are leaked.
+	// Consume from all. If any fails, we must attempt to return tokens to previous limiters.
+	consumed := make([]Limiter, 0, len(cl.limiters))
 	for _, l := range cl.limiters {
 		if !l.AllowN(n) {
+			// Rollback: return tokens to previously consumed limiters
+			for _, prev := range consumed {
+				prev.AllowN(-n)
+			}
 			return false
 		}
+		consumed = append(consumed, l)
 	}
 	return true
 }
@@ -733,8 +736,6 @@ func (cl *ClusterLimiter) TryAllow(n float64) bool {
 func (cl *ClusterLimiter) AllowWithDuration(n float64) (bool, time.Duration) {
 	var maxWait time.Duration
 	for _, l := range cl.limiters {
-		// We use Available() to check instead of AllowWithDuration because
-		// we must NOT consume tokens if any other limiter in the cluster denies.
 		if l.Available() < n {
 			allowed, wait := l.AllowWithDuration(n)
 			if !allowed {
@@ -746,13 +747,10 @@ func (cl *ClusterLimiter) AllowWithDuration(n float64) (bool, time.Duration) {
 		}
 	}
 	// If all passed the Available() check, we attempt to consume from all.
-	// Note: This part still has the same race as AllowN.
-	for _, l := range cl.limiters {
-		if !l.AllowN(n) {
-			return false, time.Duration(1<<63 - 1)
-		}
+	if cl.AllowN(n) {
+		return true, 0
 	}
-	return true, 0
+	return false, time.Duration(1<<63 - 1)
 }
 
 func (cl *ClusterLimiter) BatchAllow(requests []float64) []bool {
@@ -824,8 +822,7 @@ func (cl *ClusterLimiter) WaitUntil(ctx context.Context, target time.Time) {
 }
 
 func (cl *ClusterLimiter) SetLimit(rate, capacity float64) {
-	// ClusterLimiter doesn't have a single rate/capacity. 
-	// This is a no-op or could be implemented to update all underlying limiters if they support it.
+	// ClusterLimiter doesn't have a single rate/capacity.
 }
 
 func (cl *ClusterLimiter) Capacity() float64 {
@@ -928,12 +925,6 @@ func (pl *PriorityLimiter) AllowPriority(priority int, n float64) bool {
 	defer pl.mu.RUnlock()
 
 	totalAvailable := pl.limiter.Available()
-	
-	// Calculate how many tokens are currently 'reserved' for higher priorities
-	// In a simple share model, we allow a priority if the total available exceeds
-	// the combined minimum requirements of all priorities higher than it.
-	// However, for a simpler implementation, we use the share to determine
-	// a minimum guaranteed floor.
 	
 	share, ok := pl.shares[priority]
 	if !ok {
