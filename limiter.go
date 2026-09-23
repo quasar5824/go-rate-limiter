@@ -942,7 +942,7 @@ func (pl *PriorityLimiter) AllowPriority(priority int, n float64) bool {
 	}
 
 	// Guaranteed minimum for this priority
-	guaranteed := pl.limiter.Capacity() * share
+	_ = pl.limiter.Capacity() * share
 	
 	// We allow if (totalAvailable) is enough for the request, 
 	// but we only block low priority if available tokens fall below the sum of higher priority shares.
