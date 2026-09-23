@@ -619,4 +619,34 @@ func TestPriorityLimiter(t *testing.T) {
 	if !pl.AllowPriority(0, 1.0) {
 		t.Error("High priority should be able to take the last token")
 	}
+
+	// Test fallback to default for unknown priority
+	l2 := NewLimiter(10, 5)
+	pl2 := NewPriorityLimiter(l2, shares)
+	if !pl2.AllowPriority(99, 1.0) {
+		t.Error("Unknown priority should fallback to default AllowN(n)")
+	}
+
+	// Test dynamic share adjustment
+	l3 := NewLimiter(10, 10)
+	pl3 := NewPriorityLimiter(l3, shares)
+
+	// Use 6 tokens, leaving 4. 
+	// Current floor for priority 1 (low) is 5 (priority 0 share).
+	// Priority 1 should be blocked.
+	l3.AllowN(6.0)
+	if pl3.AllowPriority(1, 1.0) {
+		t.Error("Priority 1 should be blocked when available (4) < high priority floor (5)")
+	}
+
+	// Update shares: priority 0 now only needs 2 tokens
+	pl3.SetShares(map[int]float64{
+		0: 0.2,
+		1: 0.8,
+	})
+
+	// Now floor for priority 1 is 2. Available is 4. Should be allowed.
+	if !pl3.AllowPriority(1, 1.0) {
+		t.Error("Priority 1 should be allowed after reducing high priority floor")
+	}
 }
