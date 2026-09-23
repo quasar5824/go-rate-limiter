@@ -825,7 +825,10 @@ func (cl *ClusterLimiter) WaitUntil(ctx context.Context, target time.Time) {
 }
 
 func (cl *ClusterLimiter) SetLimit(rate, capacity float64) {
-	// ClusterLimiter doesn't have a single rate/capacity.
+	// Propagate limit changes to all underlying limiters that support it.
+	for _, l := range cl.limiters {
+		l.SetLimit(rate, capacity)
+	}
 }
 
 func (cl *ClusterLimiter) Capacity() float64 {
