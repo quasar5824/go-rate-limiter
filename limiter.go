@@ -707,13 +707,6 @@ func (cl *ClusterLimiter) Allow() bool {
 }
 
 func (cl *ClusterLimiter) AllowN(n float64) bool {
-	// Pre-flight check: ensure all limiters have enough tokens available
-	for _, l := range cl.limiters {
-		if l.Available() < n {
-			return false
-		}
-	}
-
 	// Consume from all. If any fails, we must attempt to return tokens to previous limiters.
 	consumed := make([]Limiter, 0, len(cl.limiters))
 	for _, l := range cl.limiters {
@@ -817,10 +810,10 @@ func (cl *ClusterLimiter) WaitUntil(ctx context.Context, target time.Time) {
 		return
 	}
 
-	select {
-	case <-ctx.Done():
-		return
-	case <-time.After(target.Sub(now)):
+	// For a cluster, we must ensure all constituent limiters have waited until target.
+	// Since target is an absolute time, we can simply propagate the call.
+	for _, l := range cl.limiters {
+		l.WaitUntil(ctx, target)
 	}
 }
 
