@@ -923,12 +923,28 @@ func (pl *PriorityLimiter) SetShares(shares map[int]float64) {
 	pl.shares = shares
 }
 
+// calculateFloor returns the total capacity guaranteed to priorities higher than the given priority.
+func (pl *PriorityLimiter) calculateFloor(priority int) float64 {
+	var higherPriorityShare float64
+	for p, s := range pl.shares {
+		if p < priority {
+			higherPriorityShare += s
+		}
+	}
+	return pl.limiter.Capacity() * higherPriorityShare
+}
+
 // AllowPriority checks if a request with a given priority is allowed.
 // High priority requests (smaller int) are allowed if their share is available,
 // or if they can 'borrow' from lower priorities.
 func (pl *PriorityLimiter) AllowPriority(priority int, n float64) bool {
 	pl.mu.RLock()
 	defer pl.mu.RUnlock()
+
+	// If we are returning tokens, bypass floor checks
+	if n <= 0 {
+		return pl.limiter.AllowN(n)
+	}
 
 	totalAvailable := pl.limiter.Available()
 	
@@ -939,14 +955,7 @@ func (pl *PriorityLimiter) AllowPriority(priority int, n float64) bool {
 
 	// We allow if (totalAvailable) is enough for the request, 
 	// but we only block low priority if available tokens fall below the sum of higher priority shares.
-	var higherPriorityShare float64
-	for p, s := range pl.shares {
-		if p < priority {
-			higherPriorityShare += s
-		}
-	}
-
-	minFloor := pl.limiter.Capacity() * higherPriorityShare
+	minFloor := pl.calculateFloor(priority)
 	if totalAvailable-n < minFloor {
 		return false
 	}
