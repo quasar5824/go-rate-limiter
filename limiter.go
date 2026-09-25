@@ -965,3 +965,73 @@ func (pl *PriorityLimiter) AllowPriority(priority int, n float64) bool {
 
 	return pl.limiter.AllowN(n)
 }
+
+// Allow checks if a request is allowed (default priority).
+func (pl *PriorityLimiter) Allow() bool {
+	return pl.AllowN(1.0)
+}
+
+// AllowN checks if a request requiring n tokens is allowed (default priority).
+func (pl *PriorityLimiter) AllowN(n float64) bool {
+	return pl.limiter.AllowN(n)
+}
+
+// TryAllow is an alias for AllowN.
+func (pl *PriorityLimiter) TryAllow(n float64) bool {
+	return pl.AllowN(n)
+}
+
+// AllowWithDuration checks if n tokens are available (default priority).
+func (pl *PriorityLimiter) AllowWithDuration(n float64) (bool, time.Duration) {
+	return pl.limiter.AllowWithDuration(n)
+}
+
+// BatchAllow checks multiple requests (default priority).
+func (pl *PriorityLimiter) BatchAllow(requests []float64) []bool {
+	return pl.limiter.BatchAllow(requests)
+}
+
+// Available returns available tokens from the base limiter.
+func (pl *PriorityLimiter) Available() float64 {
+	return pl.limiter.Available()
+}
+
+// Peek returns the token count without refill.
+func (pl *PriorityLimiter) Peek() float64 {
+	return pl.limiter.Peek()
+}
+
+// Reserve reserves n tokens (default priority).
+func (pl *PriorityLimiter) Reserve(n float64) time.Duration {
+	return pl.ReserveN(n)
+}
+
+// ReserveN reserves n tokens (default priority).
+func (pl *PriorityLimiter) ReserveN(n float64) time.Duration {
+	return pl.limiter.ReserveN(n)
+}
+
+// Wait blocks until 1 token is available (default priority).
+func (pl *PriorityLimiter) Wait() {
+	pl.WaitN(context.Background(), 1.0)
+}
+
+// WaitN blocks until n tokens are available (default priority).
+func (pl *PriorityLimiter) WaitN(ctx context.Context, n float64) {
+	pl.limiter.WaitN(ctx, n)
+}
+
+// WaitUntil blocks until target time is reached.
+func (pl *PriorityLimiter) WaitUntil(ctx context.Context, target time.Time) {
+	pl.limiter.WaitUntil(ctx, target)
+}
+
+// SetLimit updates the base limiter configuration.
+func (pl *PriorityLimiter) SetLimit(rate, capacity float64) {
+	pl.limiter.SetLimit(rate, capacity)
+}
+
+// Capacity returns the base limiter capacity.
+func (pl *PriorityLimiter) Capacity() float64 {
+	return pl.limiter.Capacity()
+}
