@@ -925,7 +925,7 @@ func (pl *PriorityLimiter) SetShares(shares map[int]float64) {
 
 // calculateFloor returns the total capacity guaranteed to priorities higher than the given priority.
 func (pl *PriorityLimiter) calculateFloor(priority int) float64 {
-	if len(pl.shares) == 0 {
+	if pl.shares == nil || len(pl.shares) == 0 {
 		return 0
 	}
 	var higherPriorityShare float64
