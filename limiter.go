@@ -966,6 +966,34 @@ func (pl *PriorityLimiter) AllowPriority(priority int, n float64) bool {
 	return pl.limiter.AllowN(n)
 }
 
+// WaitPriority blocks until n tokens are available for the given priority level.
+// It polls AllowPriority with a backoff or uses a simpler wait if priority is not restricted.
+func (pl *PriorityLimiter) WaitPriority(ctx context.Context, priority int, n float64) {
+	for {
+		if pl.AllowPriority(priority, n) {
+			return
+		}
+
+		// To avoid tight-looping, we check when the next token might be available
+		// For simplicity in this implementation, we wait a small duration or use
+		// the base limiter's reservation as a hint for the next check.
+		waitDuration := pl.limiter.ReserveN(n)
+		
+		// We must return the reserved tokens because AllowPriority handles its own consumption
+		pl.limiter.AllowN(-n)
+
+		if waitDuration <= 0 {
+			waitDuration = 10 * time.Millisecond
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(waitDuration):
+		}
+	}
+}
+
 // Allow checks if a request is allowed (default priority).
 func (pl *PriorityLimiter) Allow() bool {
 	return pl.AllowN(1.0)
