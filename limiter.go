@@ -983,6 +983,7 @@ func (pl *PriorityLimiter) WaitPriority(ctx context.Context, priority int, n flo
 		pl.limiter.AllowN(-n)
 
 		if waitDuration <= 0 {
+			// Use a reasonable minimum wait based on a typical rate or a small constant
 			waitDuration = 10 * time.Millisecond
 		}
 
