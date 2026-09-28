@@ -998,6 +998,11 @@ func (pl *PriorityLimiter) WaitPriority(ctx context.Context, priority int, n flo
 			waitDuration = 1 * time.Second
 		}
 
+		// Ensure a minimum sleep to prevent tight-looping on high-rate limiters
+		if waitDuration < 1*time.Millisecond {
+			waitDuration = 1 * time.Millisecond
+		}
+
 		select {
 		case <-ctx.Done():
 			return
