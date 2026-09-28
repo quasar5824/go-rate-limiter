@@ -964,24 +964,38 @@ func (pl *PriorityLimiter) AllowPriority(priority int, n float64) bool {
 }
 
 // WaitPriority blocks until n tokens are available for the given priority level.
-// It polls AllowPriority with a backoff or uses a simpler wait if priority is not restricted.
+// It uses the base limiter's refill rate to estimate the wait time until the priority floor is cleared.
 func (pl *PriorityLimiter) WaitPriority(ctx context.Context, priority int, n float64) {
 	for {
 		if pl.AllowPriority(priority, n) {
 			return
 		}
 
-		// To avoid tight-looping, we check when the next token might be available
-		// For simplicity in this implementation, we wait a small duration or use
-		// the base limiter's reservation as a hint for the next check.
-		waitDuration := pl.limiter.ReserveN(n)
-		
-		// We must return the reserved tokens because AllowPriority handles its own consumption
-		pl.limiter.AllowN(-n)
+		// Calculate how many tokens we are short of the required floor + request
+		pl.mu.RLock()
+		floor := pl.calculateFloor(priority)
+		pl.mu.RUnlock()
+
+		avail := pl.limiter.Available()
+		shortfall := (floor + n) - avail
+
+		// Estimate wait duration based on the underlying limiter's rate if known
+		// Since Limiter interface doesn't expose rate, we use a fallback or a hint
+		// For tokenBucket, we can't access rate directly without casting.
+		// Instead, we use ReserveN as a probe to find the current rate.
+		waitDuration := pl.limiter.ReserveN(1.0)
+		pl.limiter.AllowN(-1.0) // Rollback probe
 
 		if waitDuration <= 0 {
-			// Use a reasonable minimum wait based on a typical rate or a small constant
 			waitDuration = 10 * time.Millisecond
+		} else {
+			// Scale wait duration by the shortfall
+			waitDuration = time.Duration(shortfall * float64(waitDuration))
+		}
+
+		// Cap wait duration to avoid excessively long sleeps if rate changes
+		if waitDuration > 1*time.Second {
+			waitDuration = 1 * time.Second
 		}
 
 		select {
