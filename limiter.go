@@ -25,6 +25,16 @@ type Limiter interface {
 	Capacity() float64
 }
 
+// Option defines a configuration function for Limiter initialization.
+type Option func(*tokenBucket)
+
+// WithInitialTokens sets the starting number of tokens in the bucket.
+func WithInitialTokens(tokens float64) Option {
+	return func(l *tokenBucket) {
+		l.tokens = tokens
+	}
+}
+
 // tokenBucket implements the Limiter interface using the token bucket algorithm.
 type tokenBucket struct {
 	rate       float64
@@ -37,27 +47,39 @@ type tokenBucket struct {
 // NewLimiter creates a new Limiter with a given rate (tokens per second) and bucket capacity.
 // The bucket is initialized as full.
 func NewLimiter(rate float64, capacity float64) Limiter {
-	return NewLimiterWithTokens(rate, capacity, capacity)
+	return NewLimiterWithOptions(rate, capacity, WithInitialTokens(capacity))
 }
 
 // NewBurstLimiter creates a new Limiter with a given rate (tokens per second) and bucket capacity.
 // The bucket is initialized as empty, meaning the first request will be subject to the rate.
 func NewBurstLimiter(rate float64, capacity float64) Limiter {
-	return NewLimiterWithTokens(rate, capacity, 0)
+	return NewLimiterWithOptions(rate, capacity, WithInitialTokens(0))
 }
 
 // NewLimiterWithTokens creates a new Limiter with a given rate, capacity, and initial token count.
 // The initial tokens are capped at the capacity.
 func NewLimiterWithTokens(rate float64, capacity float64, tokens float64) Limiter {
-	if tokens > capacity {
-		tokens = capacity
-	}
-	return &tokenBucket{
+	return NewLimiterWithOptions(rate, capacity, WithInitialTokens(tokens))
+}
+
+// NewLimiterWithOptions creates a new Limiter using the provided options.
+func NewLimiterWithOptions(rate float64, capacity float64, opts ...Option) Limiter {
+	l := &tokenBucket{
 		rate:       rate,
 		capacity:    capacity,
-		tokens:     tokens,
+		tokens:     capacity, // Default to full
 		lastUpdate: time.Now(),
 	}
+
+	for _, opt := range opts {
+		opt(l)
+	}
+
+	if l.tokens > l.capacity {
+		l.tokens = l.capacity
+	}
+
+	return l
 }
 
 // refill updates the token count based on the time elapsed since the last update.
