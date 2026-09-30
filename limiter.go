@@ -927,15 +927,19 @@ func (kl *KeyedLimiter) Remove(key string) {
 type PriorityLimiter struct {
 	limiter Limiter
 	shares  map[int]float64 // priority -> % of total capacity/rate available
+	floors  map[int]float64 // cached priority floors
 	mu      sync.RWMutex
 }
 
 // NewPriorityLimiter creates a PriorityLimiter. shares map should sum to 1.0.
 func NewPriorityLimiter(l Limiter, shares map[int]float64) *PriorityLimiter {
-	return &PriorityLimiter{
+	pl := &PriorityLimiter{
 		limiter: l,
 		shares:  shares,
+		floors:  make(map[int]float64),
 	}
+	pl.updateFloors()
+	return pl
 }
 
 // SetShares updates the priority shares map.
@@ -943,13 +947,37 @@ func (pl *PriorityLimiter) SetShares(shares map[int]float64) {
 	pl.mu.Lock()
 	defer pl.mu.Unlock()
 	pl.shares = shares
+	pl.updateFloors()
+}
+
+// updateFloors precalculates the guaranteed capacity for each priority level.
+func (pl *PriorityLimiter) updateFloors() {
+	cap := pl.limiter.Capacity()
+	floors := make(map[int]float64)
+	
+	// Identify all priority levels present in shares
+	priorities := make([]int, 0, len(pl.shares))
+	for p := range pl.shares {
+		priorities = append(priorities, p)
+	}
+	sort.Ints(priorities)
+
+	var currentSum float64
+	for _, p := range priorities {
+		floors[p] = cap * currentSum
+		currentSum += pl.shares[p]
+	}
+	pl.floors = floors
 }
 
 // calculateFloor returns the total capacity guaranteed to priorities higher than the given priority.
 func (pl *PriorityLimiter) calculateFloor(priority int) float64 {
-	if len(pl.shares) == 0 {
-		return 0
+	if floor, ok := pl.floors[priority]; ok {
+		return floor
 	}
+
+	// If priority is not in the shares map, we must compute it dynamically
+	// based on all priorities in the map that are higher (smaller int).
 	var higherPriorityShare float64
 	for p, s := range pl.shares {
 		if p < priority {
@@ -1099,6 +1127,9 @@ func (pl *PriorityLimiter) WaitUntil(ctx context.Context, target time.Time) {
 // SetLimit updates the base limiter configuration.
 func (pl *PriorityLimiter) SetLimit(rate, capacity float64) {
 	pl.limiter.SetLimit(rate, capacity)
+	pl.mu.Lock()
+	pl.updateFloors()
+	pl.mu.Unlock()
 }
 
 // Capacity returns the base limiter capacity.
