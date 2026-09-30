@@ -23,6 +23,7 @@ type Limiter interface {
 	WaitUntil(ctx context.Context, target time.Time)
 	SetLimit(rate, capacity float64)
 	Capacity() float64
+	Rate() float64
 }
 
 // Option defines a configuration function for Limiter initialization.
@@ -112,6 +113,13 @@ func (l *tokenBucket) Capacity() float64 {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.capacity
+}
+
+// Rate returns the current refill rate of the bucket.
+func (l *tokenBucket) Rate() float64 {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.rate
 }
 
 // Allow checks if a request is allowed based on current token availability.
@@ -290,6 +298,12 @@ func (l *leakyBucket) Capacity() float64 {
 	return l.capacity
 }
 
+func (l *leakyBucket) Rate() float64 {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.rate
+}
+
 func (l *leakyBucket) Allow() bool {
 	return l.AllowN(1.0)
 }
@@ -458,6 +472,12 @@ func (l *slidingWindow) Capacity() float64 {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.capacity
+}
+
+func (l *slidingWindow) Rate() float64 {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.capacity / l.window.Seconds()
 }
 
 func (l *slidingWindow) Allow() bool {
@@ -857,6 +877,17 @@ func (cl *ClusterLimiter) Capacity() float64 {
 	return minCap
 }
 
+func (cl *ClusterLimiter) Rate() float64 {
+	minRate := 1e18
+	for _, l := range cl.limiters {
+		rate := l.Rate()
+		if rate < minRate {
+			minRate = rate
+		}
+	}
+	return minRate
+}
+
 // KeyedLimiter manages multiple limiters identified by a string key.
 type KeyedLimiter struct {
 	factory func() Limiter
@@ -1032,19 +1063,19 @@ func (pl *PriorityLimiter) WaitPriority(ctx context.Context, priority int, n flo
 		avail := pl.limiter.Available()
 		shortfall := (floor + n) - avail
 
-		// Estimate wait duration based on the underlying limiter's rate if known
-		// Since Limiter interface doesn't expose rate, we use a fallback or a hint
-		// For tokenBucket, we can't access rate directly without casting.
-		// Instead, we use ReserveN as a probe to find the current rate.
-		waitDuration := pl.limiter.ReserveN(1.0)
-		pl.limiter.AllowN(-1.0) // Rollback probe
-
-		if waitDuration <= 0 {
-			waitDuration = 10 * time.Millisecond
-		} else {
-			// Scale wait duration by the shortfall
-			waitDuration = time.Duration(shortfall * float64(waitDuration))
+		// Use the limiter's rate to calculate the wait duration
+		rate := pl.limiter.Rate()
+		if rate <= 0 {
+			waitDuration := 100 * time.Millisecond
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(waitDuration):
+			}
+			continue
 		}
+
+		waitDuration := time.Duration(shortfall / rate * float64(time.Second))
 
 		// Cap wait duration to avoid excessively long sleeps if rate changes
 		if waitDuration > 1*time.Second {
@@ -1135,4 +1166,8 @@ func (pl *PriorityLimiter) SetLimit(rate, capacity float64) {
 // Capacity returns the base limiter capacity.
 func (pl *PriorityLimiter) Capacity() float64 {
 	return pl.limiter.Capacity()
+}
+
+func (pl *PriorityLimiter) Rate() float64 {
+	return pl.limiter.Rate()
 }
