@@ -683,6 +683,68 @@ func (wl *WeightedLimiter) SetWeight(key string, weight float64) {
 	wl.weights[key] = weight
 }
 
+// Implement Limiter interface for WeightedLimiter (delegates to base limiter)
+
+func (wl *WeightedLimiter) Allow() bool {
+	return wl.limiter.Allow()
+}
+
+func (wl *WeightedLimiter) AllowN(n float64) bool {
+	return wl.limiter.AllowN(n)
+}
+
+func (wl *WeightedLimiter) TryAllow(n float64) bool {
+	return wl.limiter.TryAllow(n)
+}
+
+func (wl *WeightedLimiter) AllowWithDuration(n float64) (bool, time.Duration) {
+	return wl.limiter.AllowWithDuration(n)
+}
+
+func (wl *WeightedLimiter) BatchAllow(requests []float64) []bool {
+	return wl.limiter.BatchAllow(requests)
+}
+
+func (wl *WeightedLimiter) Available() float64 {
+	return wl.limiter.Available()
+}
+
+func (wl *WeightedLimiter) Peek() float64 {
+	return wl.limiter.Peek()
+}
+
+func (wl *WeightedLimiter) Reserve(n float64) time.Duration {
+	return wl.limiter.Reserve(n)
+}
+
+func (wl *WeightedLimiter) ReserveN(n float64) time.Duration {
+	return wl.limiter.ReserveN(n)
+}
+
+func (wl *WeightedLimiter) Wait() {
+	wl.limiter.Wait()
+}
+
+func (wl *WeightedLimiter) WaitN(ctx context.Context, n float64) {
+	wl.limiter.WaitN(ctx, n)
+}
+
+func (wl *WeightedLimiter) WaitUntil(ctx context.Context, target time.Time) {
+	wl.limiter.WaitUntil(ctx, target)
+}
+
+func (wl *WeightedLimiter) SetLimit(rate, capacity float64) {
+	wl.limiter.SetLimit(rate, capacity)
+}
+
+func (wl *WeightedLimiter) Capacity() float64 {
+	return wl.limiter.Capacity()
+}
+
+func (wl *WeightedLimiter) Rate() float64 {
+	return wl.limiter.Rate()
+}
+
 // AdaptiveLimiter adjusts the rate of an underlying limiter based on a feedback function.
 type AdaptiveLimiter struct {
 	limiter  Limiter
@@ -726,6 +788,76 @@ func (al *AdaptiveLimiter) AdjustRate(feedback func(currentRate float64) float64
 
 // CurrentRate returns the currently configured rate of the adaptive limiter.
 func (al *AdaptiveLimiter) CurrentRate() float64 {
+	al.mu.Lock()
+	defer al.mu.Unlock()
+	return al.curRate
+}
+
+// Implement Limiter interface for AdaptiveLimiter (delegates to base limiter)
+
+func (al *AdaptiveLimiter) Allow() bool {
+	return al.limiter.Allow()
+}
+
+func (al *AdaptiveLimiter) AllowN(n float64) bool {
+	return al.limiter.AllowN(n)
+}
+
+func (al *AdaptiveLimiter) TryAllow(n float64) bool {
+	return al.limiter.TryAllow(n)
+}
+
+func (al *AdaptiveLimiter) AllowWithDuration(n float64) (bool, time.Duration) {
+	return al.limiter.AllowWithDuration(n)
+}
+
+func (al *AdaptiveLimiter) BatchAllow(requests []float64) []bool {
+	return al.limiter.BatchAllow(requests)
+}
+
+func (al *AdaptiveLimiter) Available() float64 {
+	return al.limiter.Available()
+}
+
+func (al *AdaptiveLimiter) Peek() float64 {
+	return al.limiter.Peek()
+}
+
+func (al *AdaptiveLimiter) Reserve(n float64) time.Duration {
+	return al.limiter.Reserve(n)
+}
+
+func (al *AdaptiveLimiter) ReserveN(n float64) time.Duration {
+	return al.limiter.ReserveN(n)
+}
+
+func (al *AdaptiveLimiter) Wait() {
+	al.limiter.Wait()
+}
+
+func (al *AdaptiveLimiter) WaitN(ctx context.Context, n float64) {
+	al.limiter.WaitN(ctx, n)
+}
+
+func (al *AdaptiveLimiter) WaitUntil(ctx context.Context, target time.Time) {
+	al.limiter.WaitUntil(ctx, target)
+}
+
+func (al *AdaptiveLimiter) SetLimit(rate, capacity float64) {
+	al.mu.Lock()
+	defer al.mu.Unlock()
+	al.curRate = rate
+	al.capacity = capacity
+	al.limiter.SetLimit(rate, capacity)
+}
+
+func (al *AdaptiveLimiter) Capacity() float64 {
+	al.mu.Lock()
+	defer al.mu.Unlock()
+	return al.capacity
+}
+
+func (al *AdaptiveLimiter) Rate() float64 {
 	al.mu.Lock()
 	defer al.mu.Unlock()
 	return al.curRate
