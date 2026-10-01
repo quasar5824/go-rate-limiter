@@ -1025,6 +1025,7 @@ type KeyedLimiter struct {
 	factory func() Limiter
 	limiters map[string]Limiter
 	mu      sync.RWMutex
+	defaultKey string
 }
 
 // NewKeyedLimiter creates a new KeyedLimiter that uses the provided factory to create limiters for new keys.
@@ -1032,7 +1033,15 @@ func NewKeyedLimiter(factory func() Limiter) *KeyedLimiter {
 	return &KeyedLimiter{
 		factory:  factory,
 		limiters: make(map[string]Limiter),
+		defaultKey: "default",
 	}
+}
+
+// SetDefaultKey allows customizing the key used when KeyedLimiter is used as a standard Limiter.
+func (kl *KeyedLimiter) SetDefaultKey(key string) {
+	kl.mu.Lock()
+	defer kl.mu.Unlock()
+	kl.defaultKey = key
 }
 
 // getLimiter returns the limiter for the given key, creating one if it doesn't exist.
@@ -1083,6 +1092,68 @@ func (kl *KeyedLimiter) Remove(key string) {
 	kl.mu.Lock()
 	defer kl.mu.Unlock()
 	delete(kl.limiters, key)
+}
+
+// Implement Limiter interface for KeyedLimiter (delegates to the default key limiter)
+
+func (kl *KeyedLimiter) Allow() bool {
+	return kl.getLimiter(kl.defaultKey).Allow()
+}
+
+func (kl *KeyedLimiter) AllowN(n float64) bool {
+	return kl.getLimiter(kl.defaultKey).AllowN(n)
+}
+
+func (kl *KeyedLimiter) TryAllow(n float64) bool {
+	return kl.getLimiter(kl.defaultKey).TryAllow(n)
+}
+
+func (kl *KeyedLimiter) AllowWithDuration(n float64) (bool, time.Duration) {
+	return kl.getLimiter(kl.defaultKey).AllowWithDuration(n)
+}
+
+func (kl *KeyedLimiter) BatchAllow(requests []float64) []bool {
+	return kl.getLimiter(kl.defaultKey).BatchAllow(requests)
+}
+
+func (kl *KeyedLimiter) Available() float64 {
+	return kl.getLimiter(kl.defaultKey).Available()
+}
+
+func (kl *KeyedLimiter) Peek() float64 {
+	return kl.getLimiter(kl.defaultKey).Peek()
+}
+
+func (kl *KeyedLimiter) Reserve(n float64) time.Duration {
+	return kl.getLimiter(kl.defaultKey).ReserveN(n)
+}
+
+func (kl *KeyedLimiter) ReserveN(n float64) time.Duration {
+	return kl.getLimiter(kl.defaultKey).ReserveN(n)
+}
+
+func (kl *KeyedLimiter) Wait() {
+	kl.getLimiter(kl.defaultKey).Wait()
+}
+
+func (kl *KeyedLimiter) WaitN(ctx context.Context, n float64) {
+	kl.getLimiter(kl.defaultKey).WaitN(ctx, n)
+}
+
+func (kl *KeyedLimiter) WaitUntil(ctx context.Context, target time.Time) {
+	kl.getLimiter(kl.defaultKey).WaitUntil(ctx, target)
+}
+
+func (kl *KeyedLimiter) SetLimit(rate, capacity float64) {
+	kl.getLimiter(kl.defaultKey).SetLimit(rate, capacity)
+}
+
+func (kl *KeyedLimiter) Capacity() float64 {
+	return kl.getLimiter(kl.defaultKey).Capacity()
+}
+
+func (kl *KeyedLimiter) Rate() float64 {
+	return kl.getLimiter(kl.defaultKey).Rate()
 }
 
 // PriorityLimiter distributes tokens across different priority levels.
