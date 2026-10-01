@@ -532,6 +532,27 @@ func TestClusterLimiter(t *testing.T) {
 	}
 }
 
+func TestClusterLimiter_DynamicUpdate(t *testing.T) {
+	l1 := NewLimiter(10, 10)
+	l2 := NewLimiter(5, 5)
+	cl := NewClusterLimiter(l1, l2)
+
+	// Use up l2
+	for i := 0; i < 5; i++ {
+		cl.Allow()
+	}
+	if cl.Allow() {
+		t.Error("Should be denied by l2")
+	}
+
+	// Update l2 to be more permissive
+	l2.SetLimit(100, 100)
+
+	if !cl.Allow() {
+		t.Error("Should now be allowed after l2 update")
+	}
+}
+
 func TestKeyedLimiter(t *testing.T) {
 	factory := func() Limiter {
 		return NewLimiter(10, 5)
