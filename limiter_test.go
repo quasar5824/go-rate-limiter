@@ -671,3 +671,44 @@ func TestPriorityLimiter(t *testing.T) {
 		t.Error("Priority 1 should be allowed after reducing high priority floor")
 	}
 }
+
+func BenchmarkLimiter_Allow(b *testing.B) {
+	l := NewLimiter(1e9, 1e9)
+	for i := 0; i < b.N; i++ {
+		l.Allow()
+	}
+}
+
+func BenchmarkLimiter_AllowN(b *testing.B) {
+	l := NewLimiter(1e9, 1e9)
+	for i := 0; i < b.N; i++ {
+		l.AllowN(1.0)
+	}
+}
+
+func BenchmarkLimiter_Available(b *testing.B) {
+	l := NewLimiter(1e9, 1e9)
+	for i := 0; i < b.N; i++ {
+		l.Available()
+	}
+}
+
+func BenchmarkKeyedLimiter_Allow(b *testing.B) {
+	factory := func() Limiter {
+		return NewLimiter(1e9, 1e9)
+	}
+	kl := NewKeyedLimiter(factory)
+	key := "user-1"
+	for i := 0; i < b.N; i++ {
+		kl.Allow(key)
+	}
+}
+
+func BenchmarkClusterLimiter_Allow(b *testing.B) {
+	l1 := NewLimiter(1e9, 1e9)
+	l2 := NewLimiter(1e9, 1e9)
+	cl := NewClusterLimiter(l1, l2)
+	for i := 0; i < b.N; i++ {
+		cl.Allow()
+	}
+}
