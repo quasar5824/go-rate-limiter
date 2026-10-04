@@ -29,6 +29,33 @@ func TestRateLimitMiddleware(t *testing.T) {
 	}
 }
 
+func TestRateLimitMiddleware_CustomHandler(t *testing.T) {
+	l := NewLimiter(10, 0)
+	customHandler := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Custom-Limit", "true")
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte("Custom Error"))
+	}
+
+	handler := RateLimitMiddlewareWithHandler(l, customHandler)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("GET", "/", nil)
+	tr := httptest.NewRecorder()
+	handler.ServeHTTP(tr, req)
+
+	if tr.Code != http.StatusForbidden {
+		t.Errorf("Expected 403 Forbidden, got %d", tr.Code)
+	}
+	if tr.Header().Get("X-Custom-Limit") != "true" {
+		t.Error("Expected custom header X-Custom-Limit to be present")
+	}
+	if tr.Body.String() != "Custom Error" {
+		t.Errorf("Expected 'Custom Error', got '%s'", tr.Body.String())
+	}
+}
+
 func TestKeyedRateLimitMiddleware(t *testing.T) {
 	factory := func() Limiter {
 		return NewLimiter(10, 1)
