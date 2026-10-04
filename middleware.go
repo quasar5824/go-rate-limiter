@@ -1,7 +1,9 @@
 package ratelimit
 
 import (
+	"fmt"
 	"net/http"
+	"strconv"
 )
 
 // RateLimitResponseHandler defines a function signature for customizing the response when a request is rate limited.
@@ -21,6 +23,11 @@ func RateLimitMiddleware(l Limiter) func(http.Handler) http.Handler {
 func RateLimitMiddlewareWithHandler(l Limiter, handler RateLimitResponseHandler) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Try to set headers if the limiter supports Available()
+			if w.Header() != nil {
+				w.Header().Set("X-RateLimit-Remaining", strconv.FormatFloat(l.Available(), 'f', 0, 64))
+			}
+
 			if !l.Allow() {
 				handler(w, r)
 				return
@@ -40,6 +47,14 @@ func KeyedRateLimitMiddlewareWithHandler(kl *KeyedLimiter, keyExtractor func(*ht
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			key := keyExtractor(r)
+			
+			// For keyed limiters, we can't easily get the 'limit' because the factory creates them,
+			// but we can provide the current availability for the specific key.
+			if w.Header() != nil {
+				// This is an approximation since Allow(key) will be called immediately after
+				w.Header().Set("X-RateLimit-Remaining", strconv.FormatFloat(kl.Available(key), 'f', 0, 64))
+			}
+
 			if !kl.Allow(key) {
 				handler(w, r)
 				return

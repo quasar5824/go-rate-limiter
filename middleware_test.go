@@ -19,6 +19,9 @@ func TestRateLimitMiddleware(t *testing.T) {
 	if tr1.Code != http.StatusOK {
 		t.Errorf("Expected 200 OK, got %d", tr1.Code)
 	}
+	if tr1.Header().Get("X-RateLimit-Remaining") == "" {
+		t.Error("Expected X-RateLimit-Remaining header to be present")
+	}
 
 	// Second request denied (capacity 1)
 	req2 := httptest.NewRequest("GET", "/", nil)
@@ -26,6 +29,9 @@ func TestRateLimitMiddleware(t *testing.T) {
 	handler.ServeHTTP(tr2, req2)
 	if tr2.Code != http.StatusTooManyRequests {
 		t.Errorf("Expected 429 Too Many Requests, got %d", tr2.Code)
+	}
+	if tr2.Header().Get("X-RateLimit-Remaining") == "" {
+		t.Error("Expected X-RateLimit-Remaining header to be present even on denied request")
 	}
 }
 
@@ -77,6 +83,9 @@ func TestKeyedRateLimitMiddleware(t *testing.T) {
 	handler.ServeHTTP(trA1, reqA1)
 	if trA1.Code != http.StatusOK {
 		t.Errorf("User A first request expected 200, got %d", trA1.Code)
+	}
+	if trA1.Header().Get("X-RateLimit-Remaining") == "" {
+		t.Error("Expected X-RateLimit-Remaining header for keyed limiter")
 	}
 
 	// User A: Second request denied
