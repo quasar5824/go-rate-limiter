@@ -23,6 +23,27 @@ if limiter.Allow() {
 }
 ```
 
+## HTTP Middleware
+
+Integrating with `net/http` is simple:
+
+```go
+import (
+    "net/http"
+    "github.com/quasar5824/go-rate-limiter"
+)
+
+func main() {
+    limiter := ratelimit.NewLimiter(10, 5)
+    mux := http.NewServeMux()
+    
+    // Wrap your handlers with the middleware
+    handler := ratelimit.RateLimitMiddleware(limiter)(http.HandlerFunc(MyHandler))
+    
+    http.ListenAndServe(":8080", handler)
+}
+```
+
 ## API Reference
 
 ### Configuration
