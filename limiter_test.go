@@ -50,6 +50,18 @@ func TestLimiter_NewBurstLimiter(t *testing.T) {
 	if !l.Allow() {
 		t.Error("Request after refill should be allowed")
 	}
+
+	// Test that it still respects capacity after refill
+	// Wait for full capacity (5 * 100ms = 500ms)
+	time.Sleep(500 * time.Millisecond)
+	for i := 0; i < 5; i++ {
+		if !l.Allow() {
+			t.Errorf("Burst refill request %d should have been allowed", i+1)
+		}
+	}
+	if l.Allow() {
+		t.Error("Request 6 after burst refill should be denied")
+	}
 }
 
 func TestLimiter_NewLimiterWithTokens(t *testing.T) {
