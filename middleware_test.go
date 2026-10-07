@@ -33,6 +33,9 @@ func TestRateLimitMiddleware(t *testing.T) {
 	if tr2.Header().Get("X-RateLimit-Remaining") == "" {
 		t.Error("Expected X-RateLimit-Remaining header to be present even on denied request")
 	}
+	if tr2.Header().Get("Retry-After") == "" {
+		t.Error("Expected Retry-After header to be present on denied request")
+	}
 }
 
 func TestRateLimitMiddleware_CustomHandler(t *testing.T) {
@@ -95,6 +98,9 @@ func TestKeyedRateLimitMiddleware(t *testing.T) {
 	handler.ServeHTTP(trA2, reqA2)
 	if trA2.Code != http.StatusTooManyRequests {
 		t.Errorf("User A second request expected 429, got %d", trA2.Code)
+	}
+	if trA2.Header().Get("Retry-After") == "" {
+		t.Error("Expected Retry-After header for keyed limiter denied request")
 	}
 
 	// User B: First request allowed independently

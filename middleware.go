@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 )
 
 // RateLimitResponseHandler defines a function signature for customizing the response when a request is rate limited.
@@ -29,7 +30,13 @@ func RateLimitMiddlewareWithHandler(l Limiter, handler RateLimitResponseHandler)
 			}
 
 			if !l.Allow() {
-				handler(w, r)
+				// Provide a Retry-After header based on how long the client should wait for 1 token
+				if w.Header() != nil {
+					_, wait := l.AllowWithDuration(1.0)
+					w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())))
+				}
+				
+handler(w, r)
 				return
 			}
 			next.ServeHTTP(w, r)
@@ -56,7 +63,16 @@ func KeyedRateLimitMiddlewareWithHandler(kl *KeyedLimiter, keyExtractor func(*ht
 			}
 
 			if !kl.Allow(key) {
-				handler(w, r)
+				// Provide a Retry-After header based on the specific limiter for this key
+				if w.Header() != nil {
+					lim := kl.getLimiter(key)
+					if lim != nil {
+						_, wait := lim.AllowWithDuration(1.0)
+						w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())))
+					}
+				}
+				
+handler(w, r)
 				return
 			}
 			next.ServeHTTP(w, r)
