@@ -1,6 +1,7 @@
 package ratelimit
 
 import (
+	"math"
 	"net/http"
 	"strconv"
 	"time"
@@ -24,17 +25,12 @@ func RateLimitMiddlewareWithHandler(l Limiter, handler RateLimitResponseHandler)
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			available := l.Available()
-			// Note: Limiter interface currently doesn't expose capacity directly.
-			// We use Available() for remaining tokens.
 			w.Header().Set("X-RateLimit-Remaining", strconv.FormatFloat(available, 'f', 0, 64))
 
 			if !l.Allow() {
 				_, wait := l.AllowWithDuration(1.0)
 				if wait > 0 {
-					seconds := int(wait.Seconds())
-					if float64(seconds) < wait.Seconds() {
-						seconds++
-					}
+					seconds := int(math.Ceil(wait.Seconds()))
 					w.Header().Set("Retry-After", strconv.Itoa(seconds))
 				}
 				handler(w, r)
@@ -67,10 +63,7 @@ func KeyedRateLimitMiddlewareWithHandler(kl *KeyedLimiter, keyExtractor func(*ht
 				if lim != nil {
 					_, wait := lim.AllowWithDuration(1.0)
 					if wait > 0 {
-						seconds := int(wait.Seconds())
-						if float64(seconds) < wait.Seconds() {
-							seconds++
-						}
+						seconds := int(math.Ceil(wait.Seconds()))
 						w.Header().Set("Retry-After", strconv.Itoa(seconds))
 					}
 				}
