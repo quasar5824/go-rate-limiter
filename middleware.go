@@ -23,8 +23,8 @@ func RateLimitMiddleware(l Limiter) func(http.Handler) http.Handler {
 func RateLimitMiddlewareWithHandler(l Limiter, handler RateLimitResponseHandler) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("X-RateLimit-Limit", strconv.FormatFloat(l.Available(), 'f', 0, 64))
-			w.Header().Set("X-RateLimit-Remaining", strconv.FormatFloat(l.Available(), 'f', 0, 64))
+			available := l.Available()
+			w.Header().Set("X-RateLimit-Remaining", strconv.FormatFloat(available, 'f', 0, 64))
 
 			if !l.Allow() {
 				_, wait := l.AllowWithDuration(1.0)
