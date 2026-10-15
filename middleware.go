@@ -24,16 +24,21 @@ func RateLimitMiddleware(l Limiter) func(http.Handler) http.Handler {
 func RateLimitMiddlewareWithHandler(l Limiter, handler RateLimitResponseHandler) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Try to set headers if the limiter supports Available()
-			if w.Header() != nil {
-				w.Header().Set("X-RateLimit-Remaining", strconv.FormatFloat(l.Available(), 'f', 0, 64))
-			}
+			w.Header().Set("X-RateLimit-Remaining", strconv.FormatFloat(l.Available(), 'f', 0, 64))
 
 			if !l.Allow() {
-				// Provide a Retry-After header based on how long the client should wait for 1 token
-				if w.Header() != nil {
-					_, wait := l.AllowWithDuration(1.0)
-					w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())))
+				_, wait := l.AllowWithDuration(1.0)
+				if wait > 0 {
+					// RFC 7231: Retry-After can be a delay in seconds
+					// Use Ceil to avoid reporting 0 seconds when a short wait is actually needed
+					w.Header().Set("Retry-After", strconv.Itoa(int(time.Duration(wait.Seconds()*1e9+999999).Seconds())))
+					// A simpler approach for most Go servers is to use math.Ceil
+					// but since we want to avoid importing math for one call:
+					seconds := int(wait.Seconds())
+					if float64(seconds) < wait.Seconds() {
+						seconds++
+					}
+					w.Header().Set("Retry-After", strconv.Itoa(seconds))
 				}
 				
 handler(w, r)
@@ -55,20 +60,18 @@ func KeyedRateLimitMiddlewareWithHandler(kl *KeyedLimiter, keyExtractor func(*ht
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			key := keyExtractor(r)
 			
-			// For keyed limiters, we can't easily get the 'limit' because the factory creates them,
-			// but we can provide the current availability for the specific key.
-			if w.Header() != nil {
-				// This is an approximation since Allow(key) will be called immediately after
-				w.Header().Set("X-RateLimit-Remaining", strconv.FormatFloat(kl.Available(key), 'f', 0, 64))
-			}
+			w.Header().Set("X-RateLimit-Remaining", strconv.FormatFloat(kl.Available(key), 'f', 0, 64))
 
 			if !kl.Allow(key) {
-				// Provide a Retry-After header based on the specific limiter for this key
-				if w.Header() != nil {
-					lim := kl.getLimiter(key)
-					if lim != nil {
-						_, wait := lim.AllowWithDuration(1.0)
-						w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())))
+				lim := kl.getLimiter(key)
+				if lim != nil {
+					_, wait := lim.AllowWithDuration(1.0)
+					if wait > 0 {
+						seconds := int(wait.Seconds())
+						if float64(seconds) < wait.Seconds() {
+							seconds++
+						}
+						w.Header().Set("Retry-After", strconv.Itoa(seconds))
 					}
 				}
 				
