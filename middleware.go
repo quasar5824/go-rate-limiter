@@ -1,7 +1,6 @@
 package ratelimit
 
 import (
-	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -24,24 +23,19 @@ func RateLimitMiddleware(l Limiter) func(http.Handler) http.Handler {
 func RateLimitMiddlewareWithHandler(l Limiter, handler RateLimitResponseHandler) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("X-RateLimit-Limit", strconv.FormatFloat(l.Available(), 'f', 0, 64))
 			w.Header().Set("X-RateLimit-Remaining", strconv.FormatFloat(l.Available(), 'f', 0, 64))
 
 			if !l.Allow() {
 				_, wait := l.AllowWithDuration(1.0)
 				if wait > 0 {
-					// RFC 7231: Retry-After can be a delay in seconds
-					// Use Ceil to avoid reporting 0 seconds when a short wait is actually needed
-					w.Header().Set("Retry-After", strconv.Itoa(int(time.Duration(wait.Seconds()*1e9+999999).Seconds())))
-					// A simpler approach for most Go servers is to use math.Ceil
-					// but since we want to avoid importing math for one call:
 					seconds := int(wait.Seconds())
 					if float64(seconds) < wait.Seconds() {
 						seconds++
 					}
 					w.Header().Set("Retry-After", strconv.Itoa(seconds))
 				}
-				
-handler(w, r)
+				handler(w, r)
 				return
 			}
 			next.ServeHTTP(w, r)
@@ -74,8 +68,7 @@ func KeyedRateLimitMiddlewareWithHandler(kl *KeyedLimiter, keyExtractor func(*ht
 						w.Header().Set("Retry-After", strconv.Itoa(seconds))
 					}
 				}
-				
-handler(w, r)
+				handler(w, r)
 				return
 			}
 			next.ServeHTTP(w, r)
