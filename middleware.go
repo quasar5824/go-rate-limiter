@@ -24,6 +24,11 @@ func RateLimitMiddleware(l Limiter) func(http.Handler) http.Handler {
 func RateLimitMiddlewareWithHandler(l Limiter, handler RateLimitResponseHandler) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Attempt to retrieve capacity if the limiter supports it
+		if capLimiter, ok := l.(interface{ Capacity() float64 }); ok {
+			w.Header().Set("X-RateLimit-Limit", strconv.FormatFloat(capLimiter.Capacity(), 'f', 0, 64))
+		}
+
 			available := l.Available()
 			w.Header().Set("X-RateLimit-Remaining", strconv.FormatFloat(available, 'f', 0, 64))
 
@@ -54,6 +59,9 @@ func KeyedRateLimitMiddlewareWithHandler(kl *KeyedLimiter, keyExtractor func(*ht
 			
 			lim := kl.getLimiter(key)
 			if lim != nil {
+				if capLimiter, ok := lim.(interface{ Capacity() float64 }); ok {
+					w.Header().Set("X-RateLimit-Limit", strconv.FormatFloat(capLimiter.Capacity(), 'f', 0, 64))
+				}
 				available := lim.Available()
 				w.Header().Set("X-RateLimit-Remaining", strconv.FormatFloat(available, 'f', 0, 64))
 			}
