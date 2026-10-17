@@ -10,6 +10,9 @@ import (
 // RateLimitResponseHandler defines a function signature for customizing the response when a request is rate limited.
 type RateLimitResponseHandler func(w http.ResponseWriter, r *http.Request)
 
+// SkipCondition defines a function signature to determine if a request should bypass rate limiting.
+type SkipCondition func(r *http.Request) bool
+
 // DefaultRateLimitResponse is the default handler that returns a plain text 'Too Many Requests' message.
 func DefaultRateLimitResponse(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
@@ -22,12 +25,25 @@ func RateLimitMiddleware(l Limiter) func(http.Handler) http.Handler {
 
 // RateLimitMiddlewareWithHandler is like RateLimitMiddleware, but allows providing a custom response handler.
 func RateLimitMiddlewareWithHandler(l Limiter, handler RateLimitResponseHandler) func(http.Handler) http.Handler {
+	return RateLimitMiddlewareWithCondition(l, nil, handler)
+}
+
+// RateLimitMiddlewareWithCondition allows providing a SkipCondition to bypass rate limiting for certain requests.
+func RateLimitMiddlewareWithCondition(l Limiter, skip SkipCondition, handler RateLimitResponseHandler) func(http.Handler) http.Handler {
+	if handler == nil {
+		handler = DefaultRateLimitResponse
+	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if skip != nil && skip(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
+
 			// Attempt to retrieve capacity if the limiter supports it
-		if capLimiter, ok := l.(interface{ Capacity() float64 }); ok {
-			w.Header().Set("X-RateLimit-Limit", strconv.FormatFloat(capLimiter.Capacity(), 'f', 0, 64))
-		}
+			if capLimiter, ok := l.(interface{ Capacity() float64 }); ok {
+				w.Header().Set("X-RateLimit-Limit", strconv.FormatFloat(capLimiter.Capacity(), 'f', 0, 64))
+			}
 
 			available := l.Available()
 			w.Header().Set("X-RateLimit-Remaining", strconv.FormatFloat(available, 'f', 0, 64))
