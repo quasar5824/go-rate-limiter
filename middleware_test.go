@@ -38,6 +38,34 @@ func TestRateLimitMiddleware(t *testing.T) {
 	}
 }
 
+func TestRateLimitMiddleware_SkipCondition(t *testing.T) {
+	l := NewLimiter(10, 0) // Deny all by default
+	skip := func(r *http.Request) bool {
+		return r.Header.Get("X-Skip-Limit") == "true"
+	}
+
+	handler := RateLimitMiddlewareWithCondition(l, skip, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// Request without skip header should be denied
+	req1 := httptest.NewRequest("GET", "/", nil)
+	tr1 := httptest.NewRecorder()
+	handler.ServeHTTP(tr1, req1)
+	if tr1.Code != http.StatusTooManyRequests {
+		t.Errorf("Expected 429 for non-skipped request, got %d", tr1.Code)
+	}
+
+	// Request with skip header should be allowed
+	req2 := httptest.NewRequest("GET", "/", nil)
+	req2.Header.Set("X-Skip-Limit", "true")
+	tr2 := httptest.NewRecorder()
+	handler.ServeHTTP(tr2, req2)
+	if tr2.Code != http.StatusOK {
+		t.Errorf("Expected 200 for skipped request, got %d", tr2.Code)
+	}
+}
+
 func TestRateLimitMiddleware_CustomHandler(t *testing.T) {
 	l := NewLimiter(10, 0)
 	customHandler := func(w http.ResponseWriter, r *http.Request) {
@@ -89,6 +117,9 @@ func TestKeyedRateLimitMiddleware(t *testing.T) {
 	}
 	if trA1.Header().Get("X-RateLimit-Remaining") == "" {
 		t.Error("Expected X-RateLimit-Remaining header for keyed limiter")
+	}
+	if trA1.Header().Get("X-RateLimit-Limit") == "" {
+		t.Error("Expected X-RateLimit-Limit header for keyed limiter")
 	}
 
 	// User A: Second request denied
