@@ -13,6 +13,9 @@ type RateLimitResponseHandler func(w http.ResponseWriter, r *http.Request)
 // SkipCondition defines a function signature to determine if a request should bypass rate limiting.
 type SkipCondition func(r *http.Request) bool
 
+// CostExtractor defines a function signature to determine the token cost of a request.
+type CostExtractor func(r *http.Request) float64
+
 // DefaultRateLimitResponse is the default handler that returns a plain text 'Too Many Requests' message.
 func DefaultRateLimitResponse(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
@@ -50,6 +53,36 @@ func RateLimitMiddlewareWithCondition(l Limiter, skip SkipCondition, handler Rat
 
 			if !l.Allow() {
 				_, wait := l.AllowWithDuration(1.0)
+				if wait > 0 {
+					seconds := int(math.Ceil(wait.Seconds()))
+					w.Header().Set("Retry-After", strconv.Itoa(seconds))
+				}
+				handler(w, r)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// RateLimitMiddlewareWithCost allows providing a CostExtractor to determine how many tokens each request consumes.
+func RateLimitMiddlewareWithCost(l Limiter, cost CostExtractor, handler RateLimitResponseHandler) func(http.Handler) http.Handler {
+	if handler == nil {
+		handler = DefaultRateLimitResponse
+	}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			costVal := cost(r)
+
+			if capLimiter, ok := l.(interface{ Capacity() float64 }); ok {
+				w.Header().Set("X-RateLimit-Limit", strconv.FormatFloat(capLimiter.Capacity(), 'f', 0, 64))
+			}
+
+			available := l.Available()
+			w.Header().Set("X-RateLimit-Remaining", strconv.FormatFloat(available, 'f', 0, 64))
+
+			if !l.AllowN(costVal) {
+				_, wait := l.AllowWithDuration(costVal)
 				if wait > 0 {
 					seconds := int(math.Ceil(wait.Seconds()))
 					w.Header().Set("Retry-After", strconv.Itoa(seconds))

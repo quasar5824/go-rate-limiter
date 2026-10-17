@@ -93,6 +93,36 @@ func TestRateLimitMiddleware_CustomHandler(t *testing.T) {
 	}
 }
 
+func TestRateLimitMiddleware_WithCost(t *testing.T) {
+	l := NewLimiter(10, 5)
+	costExtractor := func(r *http.Request) float64 {
+		if r.Method == "POST" {
+			return 5.0
+		}
+		return 1.0
+	}
+
+	handler := RateLimitMiddlewareWithCost(l, costExtractor, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// POST should consume all 5 tokens
+	reqPost := httptest.NewRequest("POST", "/", nil)
+	trPost := httptest.NewRecorder()
+	handler.ServeHTTP(trPost, reqPost)
+	if trPost.Code != http.StatusOK {
+		t.Errorf("Expected 200 OK for first POST, got %d", trPost.Code)
+	}
+
+	// Next GET should be denied as bucket is empty
+	reqGet := httptest.NewRequest("GET", "/", nil)
+	trGet := httptest.NewRecorder()
+	handler.ServeHTTP(trGet, reqGet)
+	if trGet.Code != http.StatusTooManyRequests {
+		t.Errorf("Expected 429 for GET after heavy POST, got %d", trGet.Code)
+	}
+}
+
 func TestKeyedRateLimitMiddleware(t *testing.T) {
 	factory := func() Limiter {
 		return NewLimiter(10, 1)
