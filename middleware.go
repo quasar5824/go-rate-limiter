@@ -1,7 +1,7 @@
 package ratelimit
 
 import (
-	"math"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -54,8 +54,8 @@ func RateLimitMiddlewareWithCondition(l Limiter, skip SkipCondition, handler Rat
 			if !l.Allow() {
 				_, wait := l.AllowWithDuration(1.0)
 				if wait > 0 {
-					seconds := int(math.Ceil(wait.Seconds()))
-					w.Header().Set("Retry-After", strconv.Itoa(seconds))
+					// Use formatted float for Retry-After to provide sub-second precision if needed
+					w.Header().Set("Retry-After", fmt.Sprintf("%.3f", wait.Seconds()))
 				}
 				handler(w, r)
 				return
@@ -84,8 +84,7 @@ func RateLimitMiddlewareWithCost(l Limiter, cost CostExtractor, handler RateLimi
 			if !l.AllowN(costVal) {
 				_, wait := l.AllowWithDuration(costVal)
 				if wait > 0 {
-					seconds := int(math.Ceil(wait.Seconds()))
-					w.Header().Set("Retry-After", strconv.Itoa(seconds))
+						w.Header().Set("Retry-After", fmt.Sprintf("%.3f", wait.Seconds()))
 				}
 				handler(w, r)
 				return
@@ -102,6 +101,9 @@ func KeyedRateLimitMiddleware(kl *KeyedLimiter, keyExtractor func(*http.Request)
 
 // KeyedRateLimitMiddlewareWithHandler is like KeyedRateLimitMiddleware, but allows providing a custom response handler.
 func KeyedRateLimitMiddlewareWithHandler(kl *KeyedLimiter, keyExtractor func(*http.Request) string, handler RateLimitResponseHandler) func(http.Handler) http.Handler {
+	if handler == nil {
+		handler = DefaultRateLimitResponse
+	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			key := keyExtractor(r)
@@ -120,8 +122,7 @@ func KeyedRateLimitMiddlewareWithHandler(kl *KeyedLimiter, keyExtractor func(*ht
 				if lim != nil {
 					_, wait := lim.AllowWithDuration(1.0)
 					if wait > 0 {
-						seconds := int(math.Ceil(wait.Seconds()))
-						w.Header().Set("Retry-After", strconv.Itoa(seconds))
+							w.Header().Set("Retry-After", fmt.Sprintf("%.3f", wait.Seconds()))
 					}
 				}
 				handler(w, r)
