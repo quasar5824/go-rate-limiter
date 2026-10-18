@@ -3,6 +3,7 @@ package ratelimit
 import (
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 )
 
@@ -35,6 +36,27 @@ func TestRateLimitMiddleware(t *testing.T) {
 	}
 	if tr2.Header().Get("Retry-After") == "" {
 		t.Error("Expected Retry-After header to be present on denied request")
+	}
+}
+
+func TestRateLimitMiddleware_HeaderProgression(t *testing.T) {
+	l := NewLimiter(10, 3)
+	handler := RateLimitMiddleware(l)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	for i := 0; i < 3; i++ {
+		req := httptest.NewRequest("GET", "/", nil)
+		tr := httptest.NewRecorder()
+		handler.ServeHTTP(tr, req)
+		if tr.Code != http.StatusOK {
+			t.Errorf("Request %d should be allowed, got %d", i+1, tr.Code)
+		}
+		// Tokens start at 3.0. After 1st call, Remaining should be 2.0, etc.
+		expected := strconv.FormatFloat(float64(3-i-1), 'f', 0, 64)
+		if tr.Header().Get("X-RateLimit-Remaining") != expected {
+			t.Errorf("Request %d: expected X-RateLimit-Remaining %s, got %s", i+1, expected, tr.Header().Get("X-RateLimit-Remaining"))
+		}
 	}
 }
 
