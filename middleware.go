@@ -101,12 +101,18 @@ func KeyedRateLimitMiddleware(kl *KeyedLimiter, keyExtractor func(*http.Request)
 
 // KeyedRateLimitMiddlewareWithHandler is like KeyedRateLimitMiddleware, but allows providing a custom response handler.
 func KeyedRateLimitMiddlewareWithHandler(kl *KeyedLimiter, keyExtractor func(*http.Request) string, handler RateLimitResponseHandler) func(http.Handler) http.Handler {
+	return KeyedRateLimitMiddlewareWithCost(kl, keyExtractor, func(r *http.Request) float64 { return 1.0 }, handler)
+}
+
+// KeyedRateLimitMiddlewareWithCost allows providing a CostExtractor for keyed rate limiting.
+func KeyedRateLimitMiddlewareWithCost(kl *KeyedLimiter, keyExtractor func(*http.Request) string, cost CostExtractor, handler RateLimitResponseHandler) func(http.Handler) http.Handler {
 	if handler == nil {
 		handler = DefaultRateLimitResponse
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			key := keyExtractor(r)
+			costVal := cost(r)
 			
 			lim := kl.getLimiter(key)
 			if lim != nil {
@@ -117,10 +123,10 @@ func KeyedRateLimitMiddlewareWithHandler(kl *KeyedLimiter, keyExtractor func(*ht
 				w.Header().Set("X-RateLimit-Remaining", strconv.FormatFloat(available, 'f', 0, 64))
 			}
 
-			if !kl.Allow(key) {
+			if !kl.AllowN(key, costVal) {
 				lim = kl.getLimiter(key)
 				if lim != nil {
-					_, wait := lim.AllowWithDuration(1.0)
+					_, wait := lim.AllowWithDuration(costVal)
 					if wait > 0 {
 							w.Header().Set("Retry-After", fmt.Sprintf("%.3f", wait.Seconds()))
 					}
