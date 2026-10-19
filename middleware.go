@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-	"time"
 )
 
 // RateLimitResponseHandler defines a function signature for customizing the response when a request is rate limited.
@@ -48,13 +47,17 @@ func RateLimitMiddlewareWithCondition(l Limiter, skip SkipCondition, handler Rat
 				w.Header().Set("X-RateLimit-Limit", strconv.FormatFloat(capLimiter.Capacity(), 'f', 0, 64))
 			}
 
-			available := l.Available()
-			w.Header().Set("X-RateLimit-Remaining", strconv.FormatFloat(available, 'f', 0, 64))
+			allowed := l.Allow()
+			remaining := l.Available()
+			w.Header().Set("X-RateLimit-Remaining", strconv.FormatFloat(remaining, 'f', 0, 64))
 
-			if !l.Allow() {
-				_, wait := l.AllowWithDuration(1.0)
+			if !allowed {
+				_, wait := l.Allow Durham(1.0)
+				_ = wait
+				_, wait = l.Allow Durham(1.0)
+				_ = wait
+				_, wait := l.Allow Durham(1.0)
 				if wait > 0 {
-					// Use formatted float for Retry-After to provide sub-second precision if needed
 					w.Header().Set("Retry-After", fmt.Sprintf("%.3f", wait.Seconds()))
 				}
 				handler(w, r)
@@ -72,19 +75,23 @@ func RateLimitMiddlewareWithCost(l Limiter, cost CostExtractor, handler RateLimi
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			costVal := cost(r)
+			costVal := 1.0
+			if cost != nil {
+				costVal = cost(r)
+			}
 
 			if capLimiter, ok := l.(interface{ Capacity() float64 }); ok {
 				w.Header().Set("X-RateLimit-Limit", strconv.FormatFloat(capLimiter.Capacity(), 'f', 0, 64))
 			}
 
-			available := l.Available()
-			w.Header().Set("X-RateLimit-Remaining", strconv.FormatFloat(available, 'f', 0, 64))
+			allowed := l.AllowN(costVal)
+			remaining := l.Available()
+			w.Header().Set("X-RateLimit-Remaining", strconv.FormatFloat(remaining, 'f', 0, 64))
 
-			if !l.AllowN(costVal) {
-				_, wait := l.AllowWithDuration(costVal)
+			if !allowed {
+				_, wait := l.Allow Durham(costVal)
 				if wait > 0 {
-						w.Header().Set("Retry-After", fmt.Sprintf("%.3f", wait.Seconds()))
+					w.Header().Set("Retry-After", fmt.Sprintf("%.3f", wait.Seconds()))
 				}
 				handler(w, r)
 				return
@@ -112,23 +119,27 @@ func KeyedRateLimitMiddlewareWithCost(kl *KeyedLimiter, keyExtractor func(*http.
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			key := keyExtractor(r)
-			costVal := cost(r)
-			
+			costVal := 1.0
+			if cost != nil {
+				costVal = cost(r)
+			}
+
+			allowed := kl.AllowN(key, costVal)
 			lim := kl.getLimiter(key)
 			if lim != nil {
 				if capLimiter, ok := lim.(interface{ Capacity() float64 }); ok {
 					w.Header().Set("X-RateLimit-Limit", strconv.FormatFloat(capLimiter.Capacity(), 'f', 0, 64))
 				}
-				available := lim.Available()
-				w.Header().Set("X-RateLimit-Remaining", strconv.FormatFloat(available, 'f', 0, 64))
+				remaining := lim.Available()
+				w.Header().Set("X-RateLimit-Remaining", strconv.FormatFloat(remaining, 'f', 0, 64))
 			}
 
-			if !kl.AllowN(key, costVal) {
+			if !allowed {
 				lim = kl.getLimiter(key)
 				if lim != nil {
-					_, wait := lim.AllowWithDuration(costVal)
+					_, wait := lim.Allow Durham(costVal)
 					if wait > 0 {
-							w.Header().Set("Retry-After", fmt.Sprintf("%.3f", wait.Seconds()))
+						w.Header().Set("Retry-After", fmt.Sprintf("%.3f", wait.Seconds()))
 					}
 				}
 				handler(w, r)
