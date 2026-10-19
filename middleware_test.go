@@ -195,3 +195,51 @@ func TestKeyedRateLimitMiddleware(t *testing.T) {
 		t.Errorf("User B first request expected 200, got %d", trB1.Code)
 	}
 }
+
+func TestKeyedRateLimitMiddlewareWithCost(t *testing.T) {
+	factory := func() Limiter {
+		return NewLimiter(10, 5)
+	}
+	kl := NewKeyedLimiter(factory)
+	extractor := func(r *http.Request) string {
+		return r.Header.Get("X-API-Key")
+	}
+	costExtractor := func(r *http.Request) float64 {
+		if r.Header.Get("X-Cost") == "heavy" {
+			return 5.0
+		}
+		return 1.0
+	}
+
+	handler := KeyedRateLimitMiddlewareWithCost(kl, extractor, costExtractor, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// User A: heavy request consumes all tokens
+	reqA1 := httptest.NewRequest("GET", "/", nil)
+	reqA1.Header.Set("X-API-Key", "user-a")
+	reqA1.Header.Set("X-Cost", "heavy")
+	trA1 := httptest.NewRecorder()
+	handler.ServeHTTP(trA1, reqA1)
+	if trA1.Code != http.StatusOK {
+		t.Errorf("User A heavy request expected 200, got %d", trA1.Code)
+	}
+
+	// User A: second light request should be denied
+	reqA2 := httptest.NewRequest("GET", "/", nil)
+	reqA2.Header.Set("X-API-Key", "user-a")
+	trA2 := httptest.NewRecorder()
+	handler.ServeHTTP(trA2, reqA2)
+	if trA2.Code != http.StatusTooManyRequests {
+		t.Errorf("User A second request expected 429, got %d", trA2.Code)
+	}
+
+	// User B: should be independent
+	reqB1 := httptest.NewRequest("GET", "/", nil)
+	reqB1.Header.Set("X-API-Key", "user-b")
+	trB1 := httptest.NewRecorder()
+	handler.ServeHTTP(trB1, reqB1)
+	if trB1.Code != http.StatusOK {
+		t.Errorf("User B request expected 200, got %d", trB1.Code)
+	}
+}
