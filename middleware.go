@@ -52,11 +52,7 @@ func RateLimitMiddlewareWithCondition(l Limiter, skip SkipCondition, handler Rat
 			w.Header().Set("X-RateLimit-Remaining", strconv.FormatFloat(remaining, 'f', 0, 64))
 
 			if !allowed {
-				_, wait := l.Allow Durham(1.0)
-				_ = wait
-				_, wait = l.Allow Durham(1.0)
-				_ = wait
-				_, wait := l.Allow Durham(1.0)
+				_, wait := l.AllowWithDuration(1.0)
 				if wait > 0 {
 					w.Header().Set("Retry-After", fmt.Sprintf("%.3f", wait.Seconds()))
 				}
@@ -89,7 +85,7 @@ func RateLimitMiddlewareWithCost(l Limiter, cost CostExtractor, handler RateLimi
 			w.Header().Set("X-RateLimit-Remaining", strconv.FormatFloat(remaining, 'f', 0, 64))
 
 			if !allowed {
-				_, wait := l.Allow Durham(costVal)
+				_, wait := l.AllowWithDuration(costVal)
 				if wait > 0 {
 					w.Header().Set("Retry-After", fmt.Sprintf("%.3f", wait.Seconds()))
 				}
@@ -137,7 +133,7 @@ func KeyedRateLimitMiddlewareWithCost(kl *KeyedLimiter, keyExtractor func(*http.
 			if !allowed {
 				lim = kl.getLimiter(key)
 				if lim != nil {
-					_, wait := lim.Allow Durham(costVal)
+					_, wait := lim.AllowWithDuration(costVal)
 					if wait > 0 {
 						w.Header().Set("Retry-After", fmt.Sprintf("%.3f", wait.Seconds()))
 					}
