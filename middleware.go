@@ -2,6 +2,7 @@ package ratelimit
 
 import (
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 )
@@ -18,6 +19,28 @@ type CostExtractor func(r *http.Request) float64
 // DefaultRateLimitResponse is the default handler that returns a plain text 'Too Many Requests' message.
 func DefaultRateLimitResponse(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
+}
+
+// sanitizeCost converts an invalid request cost into a safe value. Negative costs are
+// treated as free requests, while non-finite values fall back to a single token.
+func sanitizeCost(costVal float64) float64 {
+	if math.IsNaN(costVal) || math.IsInf(costVal, 0) {
+		return 1.0
+	}
+	if costVal < 0 {
+		return 0
+	}
+	return costVal
+}
+
+// clampedAvailable returns the limiter's available token count, ensuring that tiny
+// negative floating-point results are never reported as a negative remaining count.
+func clampedAvailable(l Limiter) float64 {
+	available := l.Available()
+	if available < 0 {
+		return 0
+	}
+	return available
 }
 
 // RateLimitMiddleware returns an HTTP middleware that rate limits requests using the provided Limiter.
@@ -48,7 +71,7 @@ func RateLimitMiddlewareWithCondition(l Limiter, skip SkipCondition, handler Rat
 			}
 
 			allowed := l.Allow()
-			remaining := l.Available()
+			remaining := clampedAvailable(l)
 			w.Header().Set("X-RateLimit-Remaining", strconv.FormatFloat(remaining, 'f', 0, 64))
 
 			if !allowed {
@@ -71,9 +94,9 @@ func RateLimitMiddlewareWithCost(l Limiter, cost CostExtractor, handler RateLimi
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			costVal := 1.0
+			costVal := sanitizeCost(1.0)
 			if cost != nil {
-				costVal = cost(r)
+				costVal = sanitizeCost(cost(r))
 			}
 
 			if capLimiter, ok := l.(interface{ Capacity() float64 }); ok {
@@ -81,13 +104,15 @@ func RateLimitMiddlewareWithCost(l Limiter, cost CostExtractor, handler RateLimi
 			}
 
 			allowed := l.AllowN(costVal)
-			remaining := l.Available()
+			remaining := clampedAvailable(l)
 			w.Header().Set("X-RateLimit-Remaining", strconv.FormatFloat(remaining, 'f', 0, 64))
 
 			if !allowed {
-				_, wait := l.AllowWithDuration(costVal)
-				if wait > 0 {
-					w.Header().Set("Retry-After", fmt.Sprintf("%.3f", wait.Seconds()))
+				if costVal > 0 {
+					_, wait := l.AllowWithDuration(costVal)
+					if wait > 0 {
+						w.Header().Set("Retry-After", fmt.Sprintf("%.3f", wait.Seconds()))
+					}
 				}
 				handler(w, r)
 				return
@@ -115,9 +140,9 @@ func KeyedRateLimitMiddlewareWithCost(kl *KeyedLimiter, keyExtractor func(*http.
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			key := keyExtractor(r)
-			costVal := 1.0
+			costVal := sanitizeCost(1.0)
 			if cost != nil {
-				costVal = cost(r)
+				costVal = sanitizeCost(cost(r))
 			}
 
 			allowed := kl.AllowN(key, costVal)
@@ -126,13 +151,13 @@ func KeyedRateLimitMiddlewareWithCost(kl *KeyedLimiter, keyExtractor func(*http.
 				if capLimiter, ok := lim.(interface{ Capacity() float64 }); ok {
 					w.Header().Set("X-RateLimit-Limit", strconv.FormatFloat(capLimiter.Capacity(), 'f', 0, 64))
 				}
-				remaining := lim.Available()
+				remaining := clampedAvailable(lim)
 				w.Header().Set("X-RateLimit-Remaining", strconv.FormatFloat(remaining, 'f', 0, 64))
 			}
 
 			if !allowed {
 				lim = kl.getLimiter(key)
-				if lim != nil {
+				if lim != nil && costVal > 0 {
 					_, wait := lim.AllowWithDuration(costVal)
 					if wait > 0 {
 						w.Header().Set("Retry-After", fmt.Sprintf("%.3f", wait.Seconds()))
