@@ -103,7 +103,11 @@ func RateLimitMiddlewareWithCost(l Limiter, cost CostExtractor, handler RateLimi
 				w.Header().Set("X-RateLimit-Limit", strconv.FormatFloat(capLimiter.Capacity(), 'f', 0, 64))
 			}
 
-			allowed := l.AllowN(costVal)
+			// A zero-cost request is always allowed and does not consume tokens.
+			allowed := true
+			if costVal > 0 {
+				allowed = l.AllowN(costVal)
+			}
 			remaining := clampedAvailable(l)
 			w.Header().Set("X-RateLimit-Remaining", strconv.FormatFloat(remaining, 'f', 0, 64))
 
@@ -145,8 +149,17 @@ func KeyedRateLimitMiddlewareWithCost(kl *KeyedLimiter, keyExtractor func(*http.
 				costVal = sanitizeCost(cost(r))
 			}
 
-			allowed := kl.AllowN(key, costVal)
+			// Ensure the per-key limiter exists so headers can be reported even for
+			// zero-cost requests.
 			lim := kl.getLimiter(key)
+
+			// A zero-cost request is always allowed and does not consume tokens.
+			allowed := true
+			if costVal > 0 {
+				allowed = kl.AllowN(key, costVal)
+				lim = kl.getLimiter(key)
+			}
+
 			if lim != nil {
 				if capLimiter, ok := lim.(interface{ Capacity() float64 }); ok {
 					w.Header().Set("X-RateLimit-Limit", strconv.FormatFloat(capLimiter.Capacity(), 'f', 0, 64))
@@ -156,7 +169,6 @@ func KeyedRateLimitMiddlewareWithCost(kl *KeyedLimiter, keyExtractor func(*http.
 			}
 
 			if !allowed {
-				lim = kl.getLimiter(key)
 				if lim != nil && costVal > 0 {
 					_, wait := lim.AllowWithDuration(costVal)
 					if wait > 0 {
