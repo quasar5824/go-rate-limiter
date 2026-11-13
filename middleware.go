@@ -27,7 +27,7 @@ func sanitizeCost(costVal float64) float64 {
 	if math.IsNaN(costVal) || math.IsInf(costVal, 0) {
 		return 1.0
 	}
-	if costVal < 0 {
+	if costVal <= 0 {
 		return 0
 	}
 	return costVal
@@ -38,7 +38,7 @@ func sanitizeCost(costVal float64) float64 {
 // invalid remaining count.
 func clampedAvailable(l Limiter) float64 {
 	available := l.Available()
-	if math.IsNaN(available) || math.IsInf(available, 0) || available < 0 {
+	if math.IsNaN(available) || math.IsInf(available, 0) || available <= 0 {
 		return 0
 	}
 	return available
