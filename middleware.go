@@ -34,10 +34,11 @@ func sanitizeCost(costVal float64) float64 {
 }
 
 // clampedAvailable returns the limiter's available token count, ensuring that tiny
-// negative floating-point results are never reported as a negative remaining count.
+// negative floating-point results or non-finite values are never reported as an
+// invalid remaining count.
 func clampedAvailable(l Limiter) float64 {
 	available := l.Available()
-	if available < 0 {
+	if math.IsNaN(available) || math.IsInf(available, 0) || available < 0 {
 		return 0
 	}
 	return available

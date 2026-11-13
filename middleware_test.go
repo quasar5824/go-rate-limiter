@@ -1,6 +1,7 @@
 package ratelimit
 
 import (
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -145,6 +146,50 @@ func TestRateLimitMiddleware_WithCost(t *testing.T) {
 	}
 }
 
+func TestRateLimitMiddleware_WithCost_ZeroCost(t *testing.T) {
+	l := NewLimiter(10, 3)
+	costExtractor := func(r *http.Request) float64 {
+		return 0
+	}
+
+	handler := RateLimitMiddlewareWithCost(l, costExtractor, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	for i := 0; i < 3; i++ {
+		req := httptest.NewRequest("GET", "/", nil)
+		tr := httptest.NewRecorder()
+		handler.ServeHTTP(tr, req)
+		if tr.Code != http.StatusOK {
+			t.Errorf("Request %d should be allowed, got %d", i+1, tr.Code)
+		}
+		if tr.Header().Get("X-RateLimit-Remaining") != "3" {
+			t.Errorf("Zero-cost request %d should not consume tokens, got %s", i+1, tr.Header().Get("X-RateLimit-Remaining"))
+		}
+	}
+}
+
+func TestRateLimitMiddleware_WithCost_InvalidCost(t *testing.T) {
+	l := NewLimiter(10, 2)
+	costExtractor := func(r *http.Request) float64 {
+		return math.NaN()
+	}
+
+	handler := RateLimitMiddlewareWithCost(l, costExtractor, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("GET", "/", nil)
+	tr := httptest.NewRecorder()
+	handler.ServeHTTP(tr, req)
+	if tr.Code != http.StatusOK {
+		t.Errorf("Expected 200 OK, got %d", tr.Code)
+	}
+	if tr.Header().Get("X-RateLimit-Remaining") != "1" {
+		t.Errorf("Invalid cost should fall back to one token, got %s", tr.Header().Get("X-RateLimit-Remaining"))
+	}
+}
+
 func TestKeyedRateLimitMiddleware(t *testing.T) {
 	factory := func() Limiter {
 		return NewLimiter(10, 1)
@@ -241,5 +286,33 @@ func TestKeyedRateLimitMiddlewareWithCost(t *testing.T) {
 	handler.ServeHTTP(trB1, reqB1)
 	if trB1.Code != http.StatusOK {
 		t.Errorf("User B request expected 200, got %d", trB1.Code)
+	}
+}
+
+func TestKeyedRateLimitMiddlewareWithCost_ZeroCost(t *testing.T) {
+	factory := func() Limiter {
+		return NewLimiter(10, 5)
+	}
+	kl := NewKeyedLimiter(factory)
+	extractor := func(r *http.Request) string {
+		return r.Header.Get("X-API-Key")
+	}
+	costExtractor := func(r *http.Request) float64 {
+		return -1
+	}
+
+	handler := KeyedRateLimitMiddlewareWithCost(kl, extractor, costExtractor, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("GET", "/", nil)
+	req.Header.Set("X-API-Key", "user-a")
+	tr := httptest.NewRecorder()
+	handler.ServeHTTP(tr, req)
+	if tr.Code != http.StatusOK {
+		t.Errorf("Expected 200 OK, got %d", tr.Code)
+	}
+	if tr.Header().Get("X-RateLimit-Remaining") != "5" {
+		t.Errorf("Zero-cost keyed request should not consume tokens, got %s", tr.Header().Get("X-RateLimit-Remaining"))
 	}
 }
