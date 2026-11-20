@@ -78,7 +78,9 @@ func RateLimitMiddlewareWithCondition(l Limiter, skip SkipCondition, handler Rat
 			if !allowed {
 				_, wait := l.AllowWithDuration(1.0)
 				if wait > 0 {
-					w.Header().Set("Retry-After", fmt.Sprintf("%.3f", wait.Seconds()))
+					if seconds := wait.Seconds(); math.IsFinite(seconds) {
+						w.Header().Set("Retry-After", fmt.Sprintf("%.3f", seconds))
+					}
 				}
 				handler(w, r)
 				return
@@ -116,7 +118,9 @@ func RateLimitMiddlewareWithCost(l Limiter, cost CostExtractor, handler RateLimi
 				if costVal > 0 {
 					_, wait := l.AllowWithDuration(costVal)
 					if wait > 0 {
-						w.Header().Set("Retry-After", fmt.Sprintf("%.3f", wait.Seconds()))
+						if seconds := wait.Seconds(); math.IsFinite(seconds) {
+							w.Header().Set("Retry-After", fmt.Sprintf("%.3f", seconds))
+						}
 					}
 				}
 				handler(w, r)
@@ -173,7 +177,9 @@ func KeyedRateLimitMiddlewareWithCost(kl *KeyedLimiter, keyExtractor func(*http.
 				if lim != nil && costVal > 0 {
 					_, wait := lim.AllowWithDuration(costVal)
 					if wait > 0 {
-						w.Header().Set("Retry-After", fmt.Sprintf("%.3f", wait.Seconds()))
+						if seconds := wait.Seconds(); math.IsFinite(seconds) {
+							w.Header().Set("Retry-After", fmt.Sprintf("%.3f", seconds))
+						}
 					}
 				}
 				handler(w, r)

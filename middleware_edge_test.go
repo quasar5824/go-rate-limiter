@@ -93,3 +93,54 @@ func TestClampedAvailable_NegativeZero(t *testing.T) {
 	// Keep strconv referenced for future header assertions.
 	_ = strconv.Itoa
 }
+
+func TestRateLimitMiddleware_WithCost_NegativeCost(t *testing.T) {
+	l := NewLimiter(10, 3)
+	costExtractor := func(r *http.Request) float64 {
+		return -5
+	}
+
+	handler := RateLimitMiddlewareWithCost(l, costExtractor, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("GET", "/", nil)
+	tr := httptest.NewRecorder()
+	handler.ServeHTTP(tr, req)
+
+	if tr.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", tr.Code)
+	}
+	if got := tr.Header().Get("X-RateLimit-Remaining"); got != "3" {
+		t.Errorf("negative cost should be treated as free, got %s", got)
+	}
+}
+
+func TestKeyedRateLimitMiddlewareWithCost_NegativeCost(t *testing.T) {
+	factory := func() Limiter {
+		return NewLimiter(10, 5)
+	}
+	kl := NewKeyedLimiter(factory)
+	extractor := func(r *http.Request) string {
+		return r.Header.Get("X-API-Key")
+	}
+	costExtractor := func(r *http.Request) float64 {
+		return -2
+	}
+
+	handler := KeyedRateLimitMiddlewareWithCost(kl, extractor, costExtractor, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("GET", "/", nil)
+	req.Header.Set("X-API-Key", "user-a")
+	tr := httptest.NewRecorder()
+	handler.ServeHTTP(tr, req)
+
+	if tr.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", tr.Code)
+	}
+	if got := tr.Header().Get("X-RateLimit-Remaining"); got != "5" {
+		t.Errorf("negative keyed cost should be treated as free, got %s", got)
+	}
+}
