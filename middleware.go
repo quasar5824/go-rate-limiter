@@ -61,6 +61,10 @@ func RateLimitMiddlewareWithCondition(l Limiter, skip SkipCondition, handler Rat
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if l == nil {
+				next.ServeHTTP(w, r)
+				return
+			}
 			if skip != nil && skip(r) {
 				next.ServeHTTP(w, r)
 				return
@@ -97,6 +101,11 @@ func RateLimitMiddlewareWithCost(l Limiter, cost CostExtractor, handler RateLimi
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if l == nil {
+				next.ServeHTTP(w, r)
+				return
+			}
+
 			costVal := sanitizeCost(1.0)
 			if cost != nil {
 				costVal = sanitizeCost(cost(r))
@@ -148,7 +157,16 @@ func KeyedRateLimitMiddlewareWithCost(kl *KeyedLimiter, keyExtractor func(*http.
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			key := keyExtractor(r)
+			if kl == nil {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			key := ""
+			if keyExtractor != nil {
+				key = keyExtractor(r)
+			}
+
 			costVal := sanitizeCost(1.0)
 			if cost != nil {
 				costVal = sanitizeCost(cost(r))
