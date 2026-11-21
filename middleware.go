@@ -47,6 +47,24 @@ func clampedAvailable(l Limiter) float64 {
 	return available
 }
 
+// reportRateLimitLimit writes X-RateLimit-Limit when the limiter exposes a finite,
+// non-negative capacity. Invalid capacities are normalized to zero rather than being
+// formatted as misleading or malformed header values.
+func reportRateLimitLimit(w http.ResponseWriter, l Limiter) {
+	if l == nil || w == nil {
+		return
+	}
+	capLimiter, ok := l.(interface{ Capacity() float64 })
+	if !ok || capLimiter == nil {
+		return
+	}
+	capacity := capLimiter.Capacity()
+	if !math.IsFinite(capacity) || capacity <= 0 {
+		capacity = 0
+	}
+	w.Header().Set("X-RateLimit-Limit", strconv.FormatFloat(capacity, 'f', 0, 64))
+}
+
 // RateLimitMiddleware returns an HTTP middleware that rate limits requests using the provided Limiter.
 func RateLimitMiddleware(l Limiter) func(http.Handler) http.Handler {
 	return RateLimitMiddlewareWithHandler(l, DefaultRateLimitResponse)
@@ -74,9 +92,7 @@ func RateLimitMiddlewareWithCondition(l Limiter, skip SkipCondition, handler Rat
 			}
 
 			// Attempt to retrieve capacity if the limiter supports it
-			if capLimiter, ok := l.(interface{ Capacity() float64 }); ok {
-				w.Header().Set("X-RateLimit-Limit", strconv.FormatFloat(capLimiter.Capacity(), 'f', 0, 64))
-			}
+			reportRateLimitLimit(w, l)
 
 			allowed := l.Allow()
 			remaining := clampedAvailable(l)
@@ -114,9 +130,7 @@ func RateLimitMiddlewareWithCost(l Limiter, cost CostExtractor, handler RateLimi
 				costVal = sanitizeCost(cost(r))
 			}
 
-			if capLimiter, ok := l.(interface{ Capacity() float64 }); ok {
-				w.Header().Set("X-RateLimit-Limit", strconv.FormatFloat(capLimiter.Capacity(), 'f', 0, 64))
-			}
+			reportRateLimitLimit(w, l)
 
 			// A zero-cost request is always allowed and does not consume tokens.
 			allowed := true
@@ -187,9 +201,7 @@ func KeyedRateLimitMiddlewareWithCost(kl *KeyedLimiter, keyExtractor func(*http.
 			}
 
 			if lim != nil {
-				if capLimiter, ok := lim.(interface{ Capacity() float64 }); ok {
-					w.Header().Set("X-RateLimit-Limit", strconv.FormatFloat(capLimiter.Capacity(), 'f', 0, 64))
-				}
+				reportRateLimitLimit(w, lim)
 				remaining := clampedAvailable(lim)
 				w.Header().Set("X-RateLimit-Remaining", strconv.FormatFloat(remaining, 'f', 0, 64))
 			}
