@@ -196,8 +196,11 @@ func KeyedRateLimitMiddlewareWithCost(kl *KeyedLimiter, keyExtractor func(*http.
 			// A zero-cost request is always allowed and does not consume tokens.
 			allowed := true
 			if costVal > 0 {
-				allowed = kl.AllowN(key, costVal)
-				lim = kl.getLimiter(key)
+				if lim != nil {
+					allowed = lim.AllowN(costVal)
+				} else {
+					allowed = false
+				}
 			}
 
 			if lim != nil {
