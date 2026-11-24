@@ -49,16 +49,28 @@ func clampedAvailable(l Limiter) float64 {
 
 // reportRateLimitLimit writes X-RateLimit-Limit when the limiter exposes a finite,
 // non-negative capacity. Invalid capacities are normalized to zero rather than being
-// formatted as misleading or malformed header values.
+// formatted as misleading or malformed header values. Both floating-point and
+// integer capacity accessors are supported.
 func reportRateLimitLimit(w http.ResponseWriter, l Limiter) {
 	if l == nil || w == nil {
 		return
 	}
-	capLimiter, ok := l.(interface{ Capacity() float64 })
-	if !ok || capLimiter == nil {
+
+	var capacity float64
+	found := false
+	if capLimiter, ok := l.(interface{ Capacity() float64 }); ok && capLimiter != nil {
+		capacity = capLimiter.Capacity()
+		found = true
+	} else if capLimiter, ok := l.(interface{ Capacity() int }); ok && capLimiter != nil {
+		capacity = float64(capLimiter.Capacity())
+		found = true
+	} else if capLimiter, ok := l.(interface{ Capacity() int64 }); ok && capLimiter != nil {
+		capacity = float64(capLimiter.Capacity())
+		found = true
+	}
+	if !found {
 		return
 	}
-	capacity := capLimiter.Capacity()
 	if !math.IsFinite(capacity) || capacity <= 0 {
 		capacity = 0
 	}
