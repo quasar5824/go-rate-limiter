@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"reflect"
 	"strconv"
 )
 
@@ -47,28 +48,40 @@ func clampedAvailable(l Limiter) float64 {
 	return available
 }
 
+// asFloat64 converts a reflected value into a float64 when its kind is numeric.
+func asFloat64(v reflect.Value) (float64, bool) {
+	switch v.Kind() {
+	case reflect.Float32, reflect.Float64:
+		return v.Float(), true
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return float64(v.Int()), true
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return float64(v.Uint()), true
+	}
+	return 0, false
+}
+
 // reportRateLimitLimit writes X-RateLimit-Limit when the limiter exposes a finite,
 // non-negative capacity. Invalid capacities are normalized to zero rather than being
-// formatted as misleading or malformed header values. Both floating-point and
-// integer capacity accessors are supported.
+// formatted as misleading or malformed header values. Capacity accessors returning
+// any numeric type are supported.
 func reportRateLimitLimit(w http.ResponseWriter, l Limiter) {
 	if l == nil || w == nil {
 		return
 	}
 
-	var capacity float64
-	found := false
-	if capLimiter, ok := l.(interface{ Capacity() float64 }); ok && capLimiter != nil {
-		capacity = capLimiter.Capacity()
-		found = true
-	} else if capLimiter, ok := l.(interface{ Capacity() int }); ok && capLimiter != nil {
-		capacity = float64(capLimiter.Capacity())
-		found = true
-	} else if capLimiter, ok := l.(interface{ Capacity() int64 }); ok && capLimiter != nil {
-		capacity = float64(capLimiter.Capacity())
-		found = true
+	method := reflect.ValueOf(l).MethodByName("Capacity")
+	if !method.IsValid() {
+		return
 	}
-	if !found {
+	methodType := method.Type()
+	if methodType.NumIn() != 0 || methodType.NumOut() != 1 {
+		return
+	}
+
+	results := method.Call(nil)
+	capacity, ok := asFloat64(results[0])
+	if !ok {
 		return
 	}
 	if !math.IsFinite(capacity) || capacity <= 0 {
