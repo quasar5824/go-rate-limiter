@@ -34,11 +34,25 @@ func sanitizeCost(costVal float64) float64 {
 	return costVal
 }
 
+// isNilLimiter reports whether l is a nil limiter, including typed nil values
+// that are stored inside the Limiter interface.
+func isNilLimiter(l Limiter) bool {
+	if l == nil {
+		return true
+	}
+	v := reflect.ValueOf(l)
+	switch v.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
+		return v.IsNil()
+	}
+	return false
+}
+
 // clampedAvailable returns the limiter's available token count, ensuring that tiny
 // negative floating-point results or non-finite values are never reported as an
 // invalid remaining count.
 func clampedAvailable(l Limiter) float64 {
-	if l == nil {
+	if isNilLimiter(l) {
 		return 0
 	}
 	available := l.Available()
@@ -66,7 +80,7 @@ func asFloat64(v reflect.Value) (float64, bool) {
 // formatted as misleading or malformed header values. Capacity accessors returning
 // any numeric type are supported.
 func reportRateLimitLimit(w http.ResponseWriter, l Limiter) {
-	if l == nil || w == nil {
+	if isNilLimiter(l) || w == nil {
 		return
 	}
 
@@ -107,7 +121,7 @@ func RateLimitMiddlewareWithCondition(l Limiter, skip SkipCondition, handler Rat
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if l == nil {
+			if isNilLimiter(l) {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -126,7 +140,7 @@ func RateLimitMiddlewareWithCondition(l Limiter, skip SkipCondition, handler Rat
 			if !allowed {
 				_, wait := l.AllowWithDuration(1.0)
 				if wait > 0 {
-					if seconds := wait.Seconds(); math.IsFinite(seconds) {
+					if seconds := wait.Seconds(); math.IsFinite(seconds) && seconds >= 0 {
 						w.Header().Set("Retry-After", fmt.Sprintf("%.3f", seconds))
 					}
 				}
@@ -145,7 +159,7 @@ func RateLimitMiddlewareWithCost(l Limiter, cost CostExtractor, handler RateLimi
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if l == nil {
+			if isNilLimiter(l) {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -169,7 +183,7 @@ func RateLimitMiddlewareWithCost(l Limiter, cost CostExtractor, handler RateLimi
 				if costVal > 0 {
 					_, wait := l.AllowWithDuration(costVal)
 					if wait > 0 {
-						if seconds := wait.Seconds(); math.IsFinite(seconds) {
+						if seconds := wait.Seconds(); math.IsFinite(seconds) && seconds >= 0 {
 							w.Header().Set("Retry-After", fmt.Sprintf("%.3f", seconds))
 						}
 					}
@@ -221,24 +235,24 @@ func KeyedRateLimitMiddlewareWithCost(kl *KeyedLimiter, keyExtractor func(*http.
 			// A zero-cost request is always allowed and does not consume tokens.
 			allowed := true
 			if costVal > 0 {
-				if lim != nil {
+				if !isNilLimiter(lim) {
 					allowed = lim.AllowN(costVal)
 				} else {
 					allowed = false
 				}
 			}
 
-			if lim != nil {
+			if !isNilLimiter(lim) {
 				reportRateLimitLimit(w, lim)
 				remaining := clampedAvailable(lim)
 				w.Header().Set("X-RateLimit-Remaining", strconv.FormatFloat(remaining, 'f', 0, 64))
 			}
 
 			if !allowed {
-				if lim != nil && costVal > 0 {
+				if !isNilLimiter(lim) && costVal > 0 {
 					_, wait := lim.AllowWithDuration(costVal)
 					if wait > 0 {
-						if seconds := wait.Seconds(); math.IsFinite(seconds) {
+						if seconds := wait.Seconds(); math.IsFinite(seconds) && seconds >= 0 {
 							w.Header().Set("Retry-After", fmt.Sprintf("%.3f", seconds))
 						}
 					}
