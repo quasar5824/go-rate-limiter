@@ -48,6 +48,20 @@ func isNilLimiter(l Limiter) bool {
 	return false
 }
 
+// isNilResponseWriter reports whether w is a nil response writer, including typed
+// nil values stored inside the http.ResponseWriter interface.
+func isNilResponseWriter(w http.ResponseWriter) bool {
+	if w == nil {
+		return true
+	}
+	v := reflect.ValueOf(w)
+	switch v.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
+		return v.IsNil()
+	}
+	return false
+}
+
 // clampedAvailable returns the limiter's available token count, ensuring that tiny
 // negative floating-point results or non-finite values are never reported as an
 // invalid remaining count.
@@ -80,7 +94,7 @@ func asFloat64(v reflect.Value) (float64, bool) {
 // formatted as misleading or malformed header values. Capacity accessors returning
 // any numeric type are supported.
 func reportRateLimitLimit(w http.ResponseWriter, l Limiter) {
-	if isNilLimiter(l) || w == nil {
+	if isNilLimiter(l) || isNilResponseWriter(w) {
 		return
 	}
 
